@@ -134,7 +134,8 @@ assign_role "$APPLY_PRINCIPAL" ServicePrincipal "Key Vault Crypto User" "$VAULT_
 grant_graph "$APPLY_PRINCIPAL" \
   Group.ReadWrite.All User.ReadWrite.All Application.ReadWrite.All \
   RoleManagement.ReadWrite.Directory PrivilegedAccess.ReadWrite.AzureADGroup RoleManagementPolicy.ReadWrite.AzureADGroup \
-  Policy.Read.All Policy.ReadWrite.ConditionalAccess Policy.ReadWrite.Authorization
+  Policy.Read.All Policy.ReadWrite.ConditionalAccess Policy.ReadWrite.Authorization \
+  Directory.ReadWrite.All
 
 log "CI identity for pull-request previews ($PREVIEW_IDENTITY)"
 create_identity "$PREVIEW_IDENTITY" "$OIDC_REPO:pull_request"
@@ -149,7 +150,7 @@ assign_role "$PREVIEW_PRINCIPAL" ServicePrincipal "Key Vault Crypto User" "$VAUL
 grant_graph "$PREVIEW_PRINCIPAL" \
   Group.Read.All User.Read.All Application.Read.All \
   RoleManagement.Read.Directory PrivilegedAccess.Read.AzureADGroup RoleManagementPolicy.Read.AzureADGroup \
-  Policy.Read.All
+  Policy.Read.All Directory.Read.All
 
 # --- GitHub variables ---------------------------------------------------------------
 log "GitHub variables in $GITHUB_REPO"

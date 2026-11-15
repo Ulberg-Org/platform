@@ -150,6 +150,7 @@ type GroupLicence = { group: GroupName; licence: Licence }
 type TenantDefaults =
     {
         usersCanCreateSecurityGroups: bool
+        usersCanCreateM365Groups: bool
         usersCanCreateApps: bool
         usersCanCreateTenants: bool
         usersCanConsentToApps: bool
@@ -162,6 +163,7 @@ module TenantDefaults =
     let locked =
         {
             usersCanCreateSecurityGroups = false
+            usersCanCreateM365Groups = false
             usersCanCreateApps = false
             usersCanCreateTenants = false
             usersCanConsentToApps = false

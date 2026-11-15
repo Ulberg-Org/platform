@@ -3,7 +3,9 @@
 #   - Global Admin: only the emergency accounts in access/people.yaml;
 #   - Privileged Role Administrator (can grant Global Admin): nobody;
 #   - Owner or User Access Administrator on the subscription, including inherited from above: only the
-#     emergency accounts.
+#     emergency accounts;
+#   - tenant defaults (D42): members can't create security groups, apps or tenants,
+#     consent to apps, invite guests, join by email domain or sign up for trials.
 # PIM activations are not standing access and are ignored. Runs in the pulumi workflow as the read-only
 # preview identity, on every PR, on main and every night, so a role added outside PIM fails a check.
 set -euo pipefail
@@ -35,10 +37,22 @@ for role in Owner "User Access Administrator"; do
   report "$role on the subscription" "$(not_allowed "$holders" "$emergency")"
 done
 
+# The same values as Desired.TenantDefaults.locked. az prints booleans in lowercase.
+defaults=$(az rest --method GET --url "$graph/policies/authorizationPolicy" --query "join(' ', [
+  to_string(defaultUserRolePermissions.allowedToCreateSecurityGroups),
+  to_string(defaultUserRolePermissions.allowedToCreateApps),
+  to_string(defaultUserRolePermissions.allowedToCreateTenants),
+  to_string(length(defaultUserRolePermissions.permissionGrantPoliciesAssigned)),
+  allowInvitesFrom,
+  to_string(allowEmailVerifiedUsersToJoinOrganization),
+  to_string(allowedToSignUpEmailBasedSubscriptions)])" -o tsv)
+[ "$defaults" = "false false false 0 adminsAndGuestInviters false false" ] ||
+  problems+=("tenant authorization policy: members may create, consent or invite ($defaults)")
+
 if [ ${#problems[@]} -gt 0 ]; then
-  echo "Standing privileged access outside PIM (object IDs):" >&2
+  echo "Standing privileged access outside PIM, or tenant defaults that allow members to create:" >&2
   printf '  %s\n' "${problems[@]}" >&2
   echo "Remove it, or make it PIM-eligible through access/people.yaml." >&2
   exit 1
 fi
-echo "Standing access ok: Global Admin, Owner and User Access Administrator are held only by the emergency accounts"
+echo "Standing access ok: Global Admin, Owner and User Access Administrator are held only by the emergency accounts, and members can't create anything on their own"
