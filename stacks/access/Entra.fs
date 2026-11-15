@@ -28,6 +28,8 @@ type Deployed =
         agentDirectoryRoles: DirectoryRoleAssignment list
         licences: Command list
         tenantDefaults: Command
+        /// Microsoft 365 group creation, a separate tenant setting (the Group.Unified directory setting).
+        tenantGroupSettings: Command
         directoryRoleEligibilities: DirectoryRoleEligibilityScheduleRequest list
         conditionalAccess: ConditionalAccessPolicy list
         /// Conditional Access policies the azuread provider can't express (authentication-context targets).
@@ -43,6 +45,7 @@ type Scripts =
         groupLicence: string
         groupLicenceDelete: string
         tenantAuthorizationPolicy: string
+        tenantGroupSettings: string
     }
 
 // ---------------------------------------------------------------------------------------------
@@ -669,6 +672,31 @@ let private tenantDefaults (script: string) (t: TenantDefaults) =
         )
     )
 
+/// The Group.Unified directory setting values for `t`, as name → value. The script keeps every other value
+/// as it is (Entra's template defaults when the setting doesn't exist yet).
+let groupSettingValues (t: TenantDefaults) : string =
+    JsonSerializer.Serialize(
+        Map
+            [
+                "EnableGroupCreation", (if t.usersCanCreateM365Groups then "true" else "false")
+            ]
+    )
+
+/// Microsoft 365 group creation, set by `script` (scripts/tenant-group-settings.sh) on apply and read back.
+/// Admins can still create groups; removing it from the plan leaves the tenant as it is.
+let private tenantGroupSettings (script: string) (t: TenantDefaults) =
+    let values = groupSettingValues t
+
+    Command(
+        "tenant-group-settings",
+        CommandArgs(
+            Create = script,
+            Interpreter = inputList [ input "/bin/bash"; input "-c" ],
+            Environment = inputMap [ "VALUES", input values ],
+            Triggers = inputList [ input (box values); input (box script) ]
+        )
+    )
+
 /// A Conditional Access policy that targets an authentication context, plus the context itself, set by
 /// scripts/ca-context-policy.sh on apply. Deleting the resource deletes the policy (the context stays).
 let private contextPolicy
@@ -901,4 +929,5 @@ let deploy (scripts: Scripts) (plan: Plan) : Deployed =
         agentDirectoryRoles = plan.agentDirectoryRoles |> List.map (agentDirectoryRole agentUsers)
         licences = plan.licences |> List.map (groupLicence scripts groups)
         tenantDefaults = tenantDefaults scripts.tenantAuthorizationPolicy plan.tenantDefaults
+        tenantGroupSettings = tenantGroupSettings scripts.tenantGroupSettings plan.tenantDefaults
     }

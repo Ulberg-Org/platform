@@ -160,4 +160,11 @@ let tenantDefaults =
 
                 Expect.equal (text "allowedToReadOtherUsers" user) "True" "read other users"
             }
+
+            test "members can't create Microsoft 365 groups" {
+                Expect.equal
+                    (Entra.groupSettingValues TenantDefaults.locked)
+                    """{"EnableGroupCreation":"false"}"""
+                    "Group.Unified values"
+            }
         ]

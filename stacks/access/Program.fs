@@ -36,6 +36,7 @@ let private run () =
                 groupLicence = script "group-licence.sh"
                 groupLicenceDelete = script "group-licence-delete.sh"
                 tenantAuthorizationPolicy = script "tenant-authorization-policy.sh"
+                tenantGroupSettings = script "tenant-group-settings.sh"
             }
 
         let subscriptionId = Config("azure-native").Require "subscriptionId"

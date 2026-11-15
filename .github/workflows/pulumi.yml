@@ -27,6 +27,9 @@ env:
   ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
   ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
   AZURE_KEYVAULT_AUTH_VIA_CLI: "true"
+  # The state backend signs in with the az CLI session only. Without this it tries managed identity first,
+  # and a runner whose metadata endpoint answers 401 stops it there ("failed to acquire a token").
+  AZURE_TOKEN_CREDENTIALS: AzureCLICredential
 
 jobs:
   preview:
