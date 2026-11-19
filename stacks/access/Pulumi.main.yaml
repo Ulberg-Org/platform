@@ -4,19 +4,13 @@ config:
   azure-native:subscriptionId: 21784576-1957-4336-89d8-a6ab6b571930
   azure-native:tenantId: e17ac17e-d8cd-4280-a4e5-94ad2bb85549
   azuread:tenantId: e17ac17e-d8cd-4280-a4e5-94ad2bb85549
-  github:owner: Ulberg
+  github:owner: Ulberg-Org
   # off | report-only | on. Stays off while security defaults are on (they can't coexist with CA policies).
   access:conditionalAccess: "on"
   access:tenantDomain: adminazurestubble162simplel.onmicrosoft.com
-  # GitHub OIDC subjects the CI identities trust (D43 migration): the personal account's (made by
-  # bootstrap.sh, imported) and the organization's, in both subject forms until we see which one GitHub
-  # issues after the transfer. The unused ones are removed after the move.
+  # GitHub OIDC subjects the CI identities trust: <owner>@<owner-id>/<repo>@<repo-id> (GitHub's immutable
+  # form, so a renamed or recreated repo doesn't match).
   access:ciIdentityResourceGroup: rg-platform-state
   access:ciTrust:
-    - name: github
-      repoPrefix: repo:Ulberg@83536945/platform@1450696781
-      madeBy: bootstrap
     - name: github-org
       repoPrefix: repo:Ulberg-Org@358725408/platform@1450696781
-    - name: github-org-name
-      repoPrefix: repo:Ulberg-Org/platform
