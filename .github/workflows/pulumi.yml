@@ -92,7 +92,9 @@ jobs:
           command: preview
           stack-name: main
           work-dir: stacks/shared
+          # Creates the stack on its first run, with the same Key Vault key as access for secrets.
           upsert: true
+          secrets-provider: azurekeyvault://kv-platform-21784576.vault.azure.net/keys/pulumi
           pulumi-version: ${{ env.PULUMI_VERSION }}
           diff: true
           comment-on-summary: true
@@ -150,7 +152,9 @@ jobs:
           command: up
           stack-name: main
           work-dir: stacks/shared
+          # Creates the stack on its first run, with the same Key Vault key as access for secrets.
           upsert: true
+          secrets-provider: azurekeyvault://kv-platform-21784576.vault.azure.net/keys/pulumi
           pulumi-version: ${{ env.PULUMI_VERSION }}
           diff: true
           comment-on-summary: true
