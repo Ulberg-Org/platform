@@ -63,7 +63,10 @@ let tests =
                     (planWith None).directoryRoles
                     |> List.map (fun r -> r.role, r.maxHours, keys r.eligible)
 
-                Expect.equal roles [ GlobalAdministrator, 1, [ "ann" ] ] "directory roles"
+                Expect.equal
+                    roles
+                    [ GlobalAdministrator, 1, [ "ann" ]; AuthenticationAdministrator, 1, [ "ann" ] ]
+                    "directory roles"
             }
 
             test "standing Azure roles: Reader for platform-read, Owner only for the emergency accounts" {

@@ -104,6 +104,9 @@ type PimRule =
 /// keep it, and those are set up by hand, not here.
 type DirectoryRole =
     | GlobalAdministrator
+    /// Issues Temporary Access Passes and resets sign-in methods for non-admin users, such as the agent
+    /// accounts (onboarding, a lost passkey). Never needs Global Admin for that.
+    | AuthenticationAdministrator
     /// Read-only: sign-in and audit logs, Conditional Access and security settings.
     | SecurityReader
 
@@ -111,12 +114,14 @@ module DirectoryRole =
     let value =
         function
         | GlobalAdministrator -> "global-administrator"
+        | AuthenticationAdministrator -> "authentication-administrator"
         | SecurityReader -> "security-reader"
 
     /// Built-in role template ID, the same in every tenant.
     let templateId =
         function
         | GlobalAdministrator -> "62e90394-69f5-4237-9190-012177145e10"
+        | AuthenticationAdministrator -> "c4e39bd9-1100-46d3-8c65-fb160da0071f"
         | SecurityReader -> "5d6b6bb7-de71-4623-b4af-96380a352509"
 
 /// A standing, read-only directory role for an agent account.
@@ -736,14 +741,17 @@ let plan
                             eligible = access.platformLeads
                         }
                     ]
+                // Signing in an agent (onboarding, a lost passkey) needs a Temporary Access Pass; Authentication
+                // Administrator issues it, so that never needs Global Admin. Same rules for both.
                 directoryRoles =
                     [
-                        {
-                            role = GlobalAdministrator
-                            maxHours = 1
-                            activation = activation
-                            eligible = access.platformLeads
-                        }
+                        for role in [ GlobalAdministrator; AuthenticationAdministrator ] ->
+                            {
+                                role = role
+                                maxHours = 1
+                                activation = activation
+                                eligible = access.platformLeads
+                            }
                     ]
                 // Subscription Owner only through the emergency accounts (D36); nobody else holds it standing.
                 roleAssignments =

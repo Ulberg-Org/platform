@@ -2,6 +2,7 @@
 # Fails if anyone holds privileged access *standing* that should only be reachable through PIM (D35, D36):
 #   - Global Admin: only the emergency accounts in access/people.yaml;
 #   - Privileged Role Administrator (can grant Global Admin): nobody;
+#   - Authentication Administrator (issues Temporary Access Passes): nobody, PIM only;
 #   - Owner or User Access Administrator on the subscription, including inherited from above: only the
 #     emergency accounts;
 #   - nobody but the apply identity created a group or app: Entra makes whoever creates one its owner, so
@@ -34,6 +35,7 @@ report() { # label principals
 
 report "standing Global Admin" "$(not_allowed "$(standing_directory_role 62e90394-69f5-4237-9190-012177145e10)" "$emergency")"
 report "standing Privileged Role Administrator" "$(standing_directory_role e8611ab8-c189-46e8-94e1-60213ab1f814)"
+report "standing Authentication Administrator" "$(standing_directory_role c4e39bd9-1100-46d3-8c65-fb160da0071f)"
 for role in Owner "User Access Administrator"; do
   holders=$(az role assignment list --scope "$sub" --include-inherited --role "$role" --query "[].principalId" -o tsv)
   report "$role on the subscription" "$(not_allowed "$holders" "$emergency")"
