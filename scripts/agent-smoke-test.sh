@@ -1,11 +1,25 @@
 #!/usr/bin/env bash
 # Manual test of Claude's agent identity (D41, AGENTS.md section 4). Claude runs it with the agent's profile
 # after the one-time setup, and again whenever the agent's access changes. Reads must work; writes must be
-# refused. A write that succeeds anyway is undone at once and fails the test.
+# refused with an authorization denial. Any other error (an expired session, a typo, a network error)
+# fails the test, because it proves nothing. A write that succeeds anyway is undone at once and fails it.
+#
+# Entra applies permissions as they were when the session was signed in: after a tenant change, sign the
+# agent in again before testing, or the old session still gets the old rights.
 set -uo pipefail
 
 failed=0
 ok() { echo "  ok    $*"; }
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+# The probe's error (in $err) must be an authorization denial from Azure, Graph or Storage.
+denied() { # label
+  if grep -qE 'AuthorizationFailed|Authorization_RequestDenied|Insufficient privileges|do not have the required permissions' "$err"; then
+    ok "$1: refused"
+  else
+    bad "$1: failed, but not with an authorization denial: $(grep -m1 . "$err")"
+  fi
+}
 bad() {
   echo "  FAIL  $*"
   failed=1
@@ -30,48 +44,52 @@ az monitor activity-log list --max-events 1 -o none 2>/dev/null && ok "read the 
   bad "read the activity log"
 az rest --method GET --url "https://graph.microsoft.com/v1.0/auditLogs/signIns?\$top=1" -o none 2>/dev/null &&
   ok "read Entra sign-in logs" || bad "read Entra sign-in logs"
+[ "$failed" = 0 ] || {
+  echo "Reads failed, so the write probes would prove nothing. Is the agent signed in (AGENTS.md section 4)?"
+  exit 1
+}
 
 echo "Writes (must be refused)"
 probe=rg-agent-write-probe
-if az group create --name "$probe" --location swedencentral -o none 2>/dev/null; then
+if az group create --name "$probe" --location swedencentral -o none 2>"$err"; then
   bad "created resource group $probe (deleting it)"
   az group delete --name "$probe" --yes --no-wait
 else
-  ok "create a resource group: refused"
+  denied "create a resource group"
 fi
 if az role assignment create --assignee-object-id "$me" --assignee-principal-type User --role Owner \
-  --scope "$sub" -o none 2>/dev/null; then
+  --scope "$sub" -o none 2>"$err"; then
   bad "made itself Owner (removing it)"
   az role assignment delete --assignee "$me" --role Owner --scope "$sub"
 else
-  ok "make itself Owner: refused"
+  denied "make itself Owner"
 fi
 if az storage blob list --account-name stplatform21784576 --container-name pulumi --auth-mode login \
-  --num-results 1 -o none 2>/dev/null; then
+  --num-results 1 -o none 2>"$err"; then
   bad "read the Pulumi state"
 else
-  ok "read the Pulumi state: refused"
+  denied "read the Pulumi state"
 fi
 if group=$(az ad group create --display-name agent-write-probe --mail-nickname agent-write-probe \
-  --query id -o tsv 2>/dev/null); then
+  --query id -o tsv 2>"$err"); then
   bad "created Entra group agent-write-probe (deleting it)"
   az ad group delete --group "$group"
 else
-  ok "create an Entra group: refused"
+  denied "create an Entra group"
 fi
 m365='{"displayName":"agent-write-probe-m365","mailNickname":"agent-write-probe-m365","groupTypes":["Unified"],"mailEnabled":true,"securityEnabled":false}'
 if group=$(az rest --method POST --url https://graph.microsoft.com/v1.0/groups --body "$m365" --query id -o tsv \
-  2>/dev/null); then
+  2>"$err"); then
   bad "created Microsoft 365 group agent-write-probe-m365 (deleting it)"
   az rest --method DELETE --url "https://graph.microsoft.com/v1.0/groups/$group"
 else
-  ok "create a Microsoft 365 group: refused"
+  denied "create a Microsoft 365 group"
 fi
-if app=$(az ad app create --display-name agent-write-probe --query id -o tsv 2>/dev/null); then
+if app=$(az ad app create --display-name agent-write-probe --query id -o tsv 2>"$err"); then
   bad "registered app agent-write-probe (deleting it)"
   az ad app delete --id "$app"
 else
-  ok "register an app: refused"
+  denied "register an app"
 fi
 
 [ "$failed" = 0 ] && echo "Agent smoke test passed" || echo "Agent smoke test FAILED"
