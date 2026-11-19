@@ -27,12 +27,6 @@ type Deployed =
 /// GitHub Actions' app ID, so a required check can only be satisfied by our own workflows.
 let private githubActions = 15368
 
-/// D34, the solo-developer exception: organization owners (only the bootstrap owner, D43) may bypass the
-/// rules, so they can push straight to main. No app gets a bypass. See the TODO in PLAN.md §13. Not the
-/// "repository admin" role: GitHub drops repository-role bypasses when a repo moves to an organization.
-let private ownerBypass =
-    RepositoryRulesetBypassActorArgs(ActorId = 1, ActorType = "OrganizationAdmin", BypassMode = "always")
-
 let private ruleset (r: Ruleset) =
     let repo = RepoName.value r.repo
 
@@ -51,7 +45,9 @@ let private ruleset (r: Ruleset) =
                             Excludes = inputList []
                         )
                 ),
-            BypassActors = inputList [ input ownerBypass ],
+            // No bypass for anyone, not even org owners (D34 ended): main changes only through a PR that the
+            // repo's leads team approved as code owner. Claude's app authors PRs, so a solo lead can approve.
+            BypassActors = inputList [],
             Rules =
                 RepositoryRulesetRulesArgs(
                     Deletion = true,
