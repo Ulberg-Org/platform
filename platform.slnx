@@ -3,7 +3,11 @@
   <Folder Name="/stacks/access/">
     <Project Path="stacks/access/Access.fsproj" />
   </Folder>
+  <Folder Name="/stacks/shared/">
+    <Project Path="stacks/shared/Shared.fsproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Access.Tests/Access.Tests.fsproj" />
+    <Project Path="tests/Shared.Tests/Shared.Tests.fsproj" />
   </Folder>
 </Solution>

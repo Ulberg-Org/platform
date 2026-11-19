@@ -1,0 +1,5 @@
+# The order the stacks are set up in (D53). Teardown runs in reverse; an environment's teardown stops at its
+# own stack, and a full platform teardown stops before `access` (which holds CI's own rights) and the manual
+# bootstrap. Environment stacks (dev, prod) join with Phase 3.
+- access
+- shared

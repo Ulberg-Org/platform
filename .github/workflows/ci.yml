@@ -65,3 +65,7 @@ jobs:
         run: dotnet build platform.slnx -c Release
       - name: Test (includes access/people.yaml and CODEOWNERS)
         run: dotnet run --project tests/Access.Tests -c Release --no-build
+      - name: Test the shared stack
+        run: dotnet run --project tests/Shared.Tests -c Release --no-build
+      - name: Workflows follow the stack order (D53)
+        run: .github/scripts/check_stack_order.sh
