@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="RenderTests.fs" />
+    <Compile Include="Main.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../environments/*.yaml" LinkBase="environments" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Expecto" Version="11.1.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../renderer/Platform.Renderer/Platform.Renderer.fsproj" />
+  </ItemGroup>
+</Project>

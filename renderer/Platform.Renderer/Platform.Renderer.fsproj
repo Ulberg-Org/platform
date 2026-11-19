@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="App.fs" />
+    <Compile Include="Environment.fs" />
+    <Compile Include="Manifest.fs" />
+    <Compile Include="Render.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../lib/Platform.Parsing/Platform.Parsing.fsproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# The platform CLI (D63): sets up the local platform (D61) and deploys an app into it, rendered from the app's
+# platform.yaml with environments/local.yaml (D60, D62).
+#
+#   platform up   <app repo>   a fresh cluster with the platform, the app's database, and the app
+#   platform down <app repo>   removes the cluster and the database
+#
+# Thin slice: kind, Cilium, Envoy Gateway, Postgres outside the cluster, the app with hot reload. ArgoCD and the
+# telemetry stack follow (PLAN Phase 2).
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+platform_root=$(cd "$here/.." && pwd)
+# shellcheck source=versions.env
+source "$here/versions.env"
+
+command=${1:?usage: platform up|down <app repo>}
+app_repo=$(cd "${2:?usage: platform up|down <app repo>}" && pwd)
+app_yaml="$app_repo/platform.yaml"
+[ -f "$app_yaml" ] || { echo "No platform.yaml in $app_repo" >&2; exit 1; }
+
+state="$app_repo/.local"
+rendered="$state/rendered"
+kubeconfig="$state/kubeconfig"
+k() { kubectl --kubeconfig "$kubeconfig" "$@"; }
+h() { helm --kubeconfig "$kubeconfig" "$@"; }
+step() { printf '\n== %s\n' "$*"; }
+
+# How the renderer runs: the published binary in the CLI image, or from source while developing the platform.
+render() {
+  if command -v platform-render >/dev/null; then
+    platform-render "$@"
+  else
+    dotnet run --project "$platform_root/renderer/Platform.Renderer" -c Release -- "$@"
+  fi
+}
+
+# Renders the app for the local environment into $rendered, with plan.json listing what the CLI must build and
+# create (Render.plan), so the CLI never parses platform.yaml itself.
+render_local() {
+  rm -rf "$rendered"
+  render "$app_yaml" "$platform_root/environments/local.yaml" dev "$rendered" >/dev/null
+  app=$(jq -r .app "$rendered/plan.json")
+  cluster=$app
+}
+
+down() {
+  kind delete cluster --name "$cluster" 2>/dev/null || true
+  docker ps -aq --filter "label=platform.app=$app" | xargs -r docker rm -f >/dev/null
+}
+
+# Postgres outside the cluster (D61), on kind's Docker network, as Azure's Flexible Server is outside AKS. The
+# platform creates the database and its roles (§9.2): local passwords here, Entra identities in Azure.
+database() { # name host
+  local db=$1 host=$2
+  docker run -d --name "$host" --label "platform.app=$app" --network kind -e POSTGRES_DB="$db" \
+    -e POSTGRES_PASSWORD=local-only-superuser "$POSTGRES_IMAGE" >/dev/null
+  until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
+  sleep 2 # pg_isready answers before the init process has restarted the server
+  until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
+  docker exec -i "$host" psql -q -U postgres -d "$db" -v ON_ERROR_STOP=1 <<SQL
+CREATE ROLE ${db}_migrator LOGIN PASSWORD 'local-only-migrator';
+CREATE ROLE ${db}_app LOGIN PASSWORD 'local-only-app';
+CREATE ROLE ${db}_readonly LOGIN PASSWORD 'local-only-readonly';
+CREATE SCHEMA $db AUTHORIZATION ${db}_migrator;
+GRANT USAGE ON SCHEMA $db TO ${db}_app, ${db}_readonly;
+ALTER DEFAULT PRIVILEGES FOR ROLE ${db}_migrator IN SCHEMA $db GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${db}_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE ${db}_migrator IN SCHEMA $db GRANT SELECT ON TABLES TO ${db}_readonly;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+SQL
+  # The app's connection, as a Secret the rendered Deployment reads (Render.fs).
+  k create namespace "$app" --dry-run=client -o yaml | k apply -f - >/dev/null
+  k -n "$app" create secret generic "$db-app" \
+    --from-literal=connectionString="Host=$host;Port=5432;Database=$db;Username=${db}_app;Password=local-only-app" \
+    --dry-run=client -o yaml | k apply -f - >/dev/null
+}
+
+up() {
+  mkdir -p "$state"
+  step "Render $app_yaml for the local environment (D60, D62)"
+  render_local
+  step "Fresh cluster $cluster (Kubernetes ${KIND_NODE_IMAGE%%@*})"
+  down
+  cat >"$state/kind.yaml" <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true # Cilium instead, which enforces network rules
+nodes:
+  - role: control-plane
+    image: $KIND_NODE_IMAGE
+    extraPortMappings:
+      - { containerPort: 30875, hostPort: 9875, listenAddress: 127.0.0.1 } # the app, through the gateway
+  # Two workers, so an app's two instances sit on different nodes (D57); the app's source is mounted on both
+  # for hot reload (D61).
+  - role: worker
+    image: $KIND_NODE_IMAGE
+    extraMounts: [ { hostPath: "$app_repo", containerPath: /src, readOnly: true } ]
+  - role: worker
+    image: $KIND_NODE_IMAGE
+    extraMounts: [ { hostPath: "$app_repo", containerPath: /src, readOnly: true } ]
+EOF
+  kind create cluster --name "$cluster" --config "$state/kind.yaml" --kubeconfig "$kubeconfig" --wait 0s
+
+  step "Cilium $CILIUM_CHART_VERSION (network and network rules)"
+  h repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
+  h repo update cilium >/dev/null
+  h install cilium cilium/cilium --version "$CILIUM_CHART_VERSION" -n kube-system \
+    --set ipam.mode=kubernetes --set operator.replicas=1 --wait --timeout 10m >/dev/null
+  k wait --for=condition=Ready nodes --all --timeout=5m >/dev/null
+
+  step "Envoy Gateway $ENVOY_GATEWAY_CHART_VERSION (the entrance)"
+  h install eg oci://docker.io/envoyproxy/gateway-helm --version "$ENVOY_GATEWAY_CHART_VERSION" \
+    -n gateway --create-namespace --wait --timeout 10m >/dev/null
+  k apply -f "$here/manifests/gateway.yaml" >/dev/null
+
+  jq -r '.databases[] | "\(.name) \(.host)"' "$rendered/plan.json" | while read -r db host; do
+    step "Database $db at $host (Postgres outside the cluster)"
+    database "$db" "$host"
+  done
+
+  step "Images (each service's dev target, D61)"
+  jq -r '.services[] | "\(.image) \(.build)"' "$rendered/plan.json" | while read -r image build; do
+    docker build -q --target dev -t "$image" "$app_repo/$build" >/dev/null
+    kind load docker-image "$image" --name "$cluster" >/dev/null
+    echo "$image"
+  done
+
+  step "Deploy"
+  k apply -f "$rendered/manifests" >/dev/null
+  for name in $(jq -r '.services[].name' "$rendered/plan.json"); do
+    k -n "$app" rollout status "deployment/$name" --timeout=10m
+  done
+
+  step "Ready"
+  echo "App: http://localhost:9875   kubectl: kubectl --kubeconfig $kubeconfig"
+}
+
+case "$command" in
+  up) up ;;
+  down) render_local && down ;;
+  *) echo "usage: platform up|down <app repo>" >&2; exit 2 ;;
+esac
