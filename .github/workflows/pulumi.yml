@@ -86,6 +86,20 @@ jobs:
           GITHUB_TOKEN: ${{ steps.github.outputs.token }}
           # PIM alert recipients (D40). A secret because the repo is public; the stack keeps it a Pulumi secret.
           PLATFORM_ALERT_EMAILS: ${{ secrets.PLATFORM_ALERT_EMAILS }}
+      # Stacks in the order of stacks/order.yaml (D53); check_stack_order.sh keeps the two in step.
+      - uses: pulumi/actions@v7
+        with:
+          command: preview
+          stack-name: main
+          work-dir: stacks/shared
+          # Creates the stack on its first run, with the same Key Vault key as access for secrets.
+          upsert: true
+          secrets-provider: azurekeyvault://kv-platform-21784576.vault.azure.net/keys/pulumi
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+          diff: true
+          comment-on-summary: true
+        env:
+          GITHUB_TOKEN: ${{ steps.github.outputs.token }}
 
   apply:
     name: pulumi up
@@ -131,9 +145,18 @@ jobs:
           comment-on-summary: true
         env:
           GITHUB_TOKEN: ${{ steps.github.outputs.token }}
-          # The Claude GitHub App's private key (D52), only until claude-app-key.sh has imported it into
-          # Key Vault; the secret is then deleted. Read by that script from the environment, never a
-          # Pulumi input, so it isn't in state.
-          CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
           # PIM alert recipients (D40). A secret because the repo is public; the stack keeps it a Pulumi secret.
           PLATFORM_ALERT_EMAILS: ${{ secrets.PLATFORM_ALERT_EMAILS }}
+      - uses: pulumi/actions@v7
+        with:
+          command: up
+          stack-name: main
+          work-dir: stacks/shared
+          # Creates the stack on its first run, with the same Key Vault key as access for secrets.
+          upsert: true
+          secrets-provider: azurekeyvault://kv-platform-21784576.vault.azure.net/keys/pulumi
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+          diff: true
+          comment-on-summary: true
+        env:
+          GITHUB_TOKEN: ${{ steps.github.outputs.token }}

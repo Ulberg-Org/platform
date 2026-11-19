@@ -1,0 +1,3 @@
+name: shared
+runtime: dotnet
+description: "Everything persistent that environments use and never destroy (D53), starting with the container registry (D54)"
