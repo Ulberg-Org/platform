@@ -4,5 +4,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Nullable>enable</Nullable>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Runs on a newer .NET runtime when .NET 10 isn't installed (developer machines have the app's .NET 11). -->
+    <RollForward>Major</RollForward>
   </PropertyGroup>
 </Project>
