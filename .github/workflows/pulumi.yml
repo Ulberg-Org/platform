@@ -69,6 +69,10 @@ jobs:
           private-key: ${{ secrets.PLATFORM_READER_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: platform,todo
+      - name: GitHub access check (D43, D52)
+        env:
+          GH_TOKEN: ${{ steps.github.outputs.token }}
+        run: .github/scripts/check_github_access.sh
       - uses: pulumi/actions@v7
         with:
           command: preview
