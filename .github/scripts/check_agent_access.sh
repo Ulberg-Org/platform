@@ -64,6 +64,10 @@ for key in $agents; do
       --query "value[].displayName" -o tsv)" "platform-agents"
 done
 
+# D52: the Claude app's key may only sign (never decrypt, wrap or export).
+expect "Key Vault key claude-github-app: permitted operations" \
+  "$(az keyvault key show --vault-name "$vault" --name claude-github-app --query "key.keyOps" -o tsv)" "sign"
+
 if [ ${#problems[@]} -gt 0 ]; then
   echo "Agent accounts hold more (or other) access than D41 allows:" >&2
   printf '  %s\n' "${problems[@]}" >&2
