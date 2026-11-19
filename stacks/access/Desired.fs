@@ -417,6 +417,7 @@ let private requiredChecks =
                 "prompt log"
                 "fsharp style"
                 "backend (format, build, test)"
+                "image (build, scan, SBOM)"
             ]
         ]
 
