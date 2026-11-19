@@ -58,6 +58,8 @@ jobs:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
         run: .github/scripts/check_standing_access.sh
       - name: Agent access check (D41)
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
         run: .github/scripts/check_agent_access.sh
       - name: GitHub token (read-only app)
         id: github
@@ -120,5 +122,9 @@ jobs:
           comment-on-summary: true
         env:
           GITHUB_TOKEN: ${{ steps.github.outputs.token }}
+          # The Claude GitHub App's private key (D52), only until claude-app-key.sh has imported it into
+          # Key Vault; the secret is then deleted. Read by that script from the environment, never a
+          # Pulumi input, so it isn't in state.
+          CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
           # PIM alert recipients (D40). A secret because the repo is public; the stack keeps it a Pulumi secret.
           PLATFORM_ALERT_EMAILS: ${{ secrets.PLATFORM_ALERT_EMAILS }}

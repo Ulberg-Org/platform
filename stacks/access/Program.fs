@@ -40,6 +40,7 @@ let private run () =
             }
 
         let githubOrgSettings = script "github-org-settings.sh"
+        let claudeAppKeyScript = script "claude-app-key.sh"
 
         let subscriptionId = Config("azure-native").Require "subscriptionId"
 
@@ -103,8 +104,17 @@ let private run () =
                 let roles = AzureRbac.deploy subscriptionId entra.groups plan
                 let github = GitHub.deploy githubOrgSettings org plan
 
-                let ci =
-                    CiFederation.deploy subscriptionId (config.Require "ciIdentityResourceGroup") plan
+                let ciResourceGroup = config.Require "ciIdentityResourceGroup"
+                let ci = CiFederation.deploy subscriptionId ciResourceGroup plan
+
+                let claudeApp =
+                    ClaudeApp.deploy
+                        subscriptionId
+                        ciResourceGroup
+                        (config.Require "keyVault")
+                        claudeAppKeyScript
+                        entra.groups
+                        claudeAppKey
 
                 // 4. Report
                 Log.Info(
@@ -115,7 +125,8 @@ let private run () =
                     + $"{entra.conditionalAccess.Length + entra.contextPolicies.Length} Conditional Access policies, {github.rulesets.Length} rulesets, "
                     + $"{github.teams.Count} teams, {github.orgMemberships.Length} org members, "
                     + $"{github.environments.Length} environments, "
-                    + $"{entra.agents.Length} agent accounts, {ci.Length} CI federated credentials"
+                    + $"{entra.agents.Length} agent accounts, {ci.Length} CI federated credentials, "
+                    + $"Claude app key {claudeAppKey.keyName}"
                 )
 
                 return
