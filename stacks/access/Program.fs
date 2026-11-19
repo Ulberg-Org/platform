@@ -68,7 +68,9 @@ let private run () =
                     |> Parse.notEmpty "access:tenantDomain"
                     |> Result.mapError List.singleton
 
-                let! plan = Desired.plan owner caState emails tenantDomain access
+                let! ciTrusts = config.Require "ciTrust" |> CiTrust.parse
+
+                let! plan = Desired.plan owner caState emails tenantDomain ciTrusts access
                 return access, plan
             }
 
@@ -93,6 +95,9 @@ let private run () =
                 let roles = AzureRbac.deploy subscriptionId entra.groups plan
                 let github = GitHub.deploy plan
 
+                let ci =
+                    CiFederation.deploy subscriptionId (config.Require "ciIdentityResourceGroup") plan
+
                 // 4. Report
                 Log.Info(
                     $"access: {entra.groups.Count} groups, {entra.members.Length} memberships, "
@@ -101,7 +106,7 @@ let private run () =
                     + $"({entra.directoryRolePolicies.Length} PIM policies), {roles.Length} Azure role assignments, "
                     + $"{entra.conditionalAccess.Length + entra.contextPolicies.Length} Conditional Access policies, {github.rulesets.Length} rulesets, "
                     + $"{github.collaborators.Length} collaborators, {github.environments.Length} environments, "
-                    + $"{entra.agents.Length} agent accounts"
+                    + $"{entra.agents.Length} agent accounts, {ci.Length} CI federated credentials"
                 )
 
                 return

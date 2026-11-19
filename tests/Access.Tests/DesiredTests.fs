@@ -7,7 +7,7 @@ open Platform.Access.Desired
 open Platform.Access.Tests.Fixtures
 
 let private planWith caState =
-    Desired.plan (github "owner-gh") caState alertEmails "example.onmicrosoft.com" (parsed valid)
+    Desired.plan (github "owner-gh") caState alertEmails "example.onmicrosoft.com" ciTrusts (parsed valid)
     |> ok
 
 let private keys (people: Person list) = people |> List.map Person.key
@@ -261,7 +261,7 @@ let tests =
 
             test "the owner is never added as a collaborator" {
                 let plan =
-                    Desired.plan (github "Ann-GH") None alertEmails "example.onmicrosoft.com" (parsed valid)
+                    Desired.plan (github "Ann-GH") None alertEmails "example.onmicrosoft.com" ciTrusts (parsed valid)
                     |> ok
 
                 let collaborators =
@@ -275,7 +275,7 @@ let tests =
                 let yaml = valid.Replace("todo: [ann, bob]", "todo: [ann, bob]\n  other: [ann]")
 
                 let plan =
-                    Desired.plan (github "owner-gh") None alertEmails "example.onmicrosoft.com" (parsed yaml)
+                    Desired.plan (github "owner-gh") None alertEmails "example.onmicrosoft.com" ciTrusts (parsed yaml)
 
                 Expect.equal plan (Error [ "no required checks defined for repo 'other'" ]) "missing checks"
             }

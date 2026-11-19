@@ -428,6 +428,104 @@ type Environment =
     }
 
 // ---------------------------------------------------------------------------------------------
+// CI identities: who may get an Azure token from GitHub Actions
+
+/// The two managed identities bootstrap.sh created for CI. The stack manages which GitHub OIDC subjects
+/// they trust; their roles and Graph permissions stay with the bootstrap.
+type CiIdentity =
+    | ApplyIdentity
+    | PreviewIdentity
+
+module CiIdentity =
+    let name =
+        function
+        | ApplyIdentity -> "id-platform-apply"
+        | PreviewIdentity -> "id-platform-preview"
+
+    /// Credential-name suffix and subject claim: approved apply runs only (the `dev` environment);
+    /// previews from pull requests and from main.
+    let claims =
+        function
+        | ApplyIdentity -> [ "", "environment:dev" ]
+        | PreviewIdentity -> [ "", "pull_request"; "-main", "ref:refs/heads/main" ]
+
+/// A repository prefix that CI tokens may carry (e.g. "repo:Ulberg-Org@358725408/platform@1450696781"),
+/// and the name its credentials get. `existing`: the credentials already exist (`madeBy: bootstrap` in the
+/// config, i.e. bootstrap.sh made them) and are imported, not created.
+type CiTrust =
+    {
+        name: string
+        repoPrefix: string
+        existing: bool
+    }
+
+type CiTrustDto =
+    {
+        name: string
+        repoPrefix: string
+        madeBy: string option
+    }
+
+module CiTrust =
+    let private name =
+        System.Text.RegularExpressions.Regex "^[A-Za-z0-9][A-Za-z0-9_-]{2,100}$"
+
+    let private repoPrefix = System.Text.RegularExpressions.Regex "^repo:[^:\\s]+$"
+
+    let private ofDto (i: int) (d: CiTrustDto) : Validation<CiTrust, string> =
+        validation {
+            let! n = Parse.matches name "name" d.name
+            and! p = Parse.matches repoPrefix "repoPrefix" d.repoPrefix
+
+            and! existing =
+                match d.madeBy with
+                | None -> Ok false
+                | Some "bootstrap" -> Ok true
+                | Some other -> Error $"'madeBy': '{other}' is not 'bootstrap'"
+
+            return
+                ({
+                    name = n
+                    repoPrefix = p
+                    existing = existing
+                }
+                : CiTrust)
+        }
+        |> Parse.within $"access:ciTrust[{i}]"
+
+    /// Parses the stack config `access:ciTrust` (a list, as JSON). At least one entry, or CI loses Azure.
+    let parse (json: string) : Validation<CiTrust list, string> =
+        Parse.yaml<CiTrustDto list> json
+        |> Validation.bind (List.mapi ofDto >> List.sequenceValidationA)
+        |> Validation.bind (fun ts ->
+            if List.isEmpty ts then
+                Validation.error "access:ciTrust is empty: CI could never get an Azure token"
+            else
+                Validation.ok ts)
+
+type FederatedCredential =
+    {
+        identity: CiIdentity
+        name: string
+        subject: string
+        existing: bool
+    }
+
+/// Every trusted repository prefix × every subject each identity accepts.
+let federatedCredentials (trusts: CiTrust list) : FederatedCredential list =
+    [
+        for t in trusts do
+            for identity in [ ApplyIdentity; PreviewIdentity ] do
+                for suffix, claim in CiIdentity.claims identity ->
+                    {
+                        identity = identity
+                        name = t.name + suffix
+                        subject = $"{t.repoPrefix}:{claim}"
+                        existing = t.existing
+                    }
+    ]
+
+// ---------------------------------------------------------------------------------------------
 // The plan
 
 type Plan =
@@ -449,6 +547,8 @@ type Plan =
         tenantDomain: string
         licences: GroupLicence list
         tenantDefaults: TenantDefaults
+        /// Which GitHub OIDC subjects the CI identities trust.
+        ciCredentials: FederatedCredential list
     }
 
 let private memberships (access: Access) =
@@ -517,6 +617,7 @@ let plan
     (caState: CaState option)
     (alertEmails: Email list)
     (tenantDomain: string)
+    (ciTrusts: CiTrust list)
     (access: Access)
     : Result<Plan, string list> =
 
@@ -623,5 +724,6 @@ let plan
                             licence = EntraIdP2
                         }
                     ]
+                ciCredentials = federatedCredentials ciTrusts
             }
     }

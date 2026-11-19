@@ -40,10 +40,10 @@ jobs:
         run: python3 .claude/hooks/test_prompt_log.py
       - name: Test the agent-identity hook (D41)
         run: python3 .claude/hooks/test_agent_identity.py
-      - name: Agent-identity hook matches Ulberg/todo
+      - name: Agent-identity hook matches todo (same owner)
         run: |
           for f in agent_identity.py test_agent_identity.py; do
-            curl -sSfL "https://raw.githubusercontent.com/Ulberg/todo/main/.claude/hooks/$f" | diff -u - ".claude/hooks/$f"
+            curl -sSfL "https://raw.githubusercontent.com/${{ github.repository_owner }}/todo/main/.claude/hooks/$f" | diff -u - ".claude/hooks/$f"
           done
 
   dotnet:
@@ -57,8 +57,8 @@ jobs:
       - run: dotnet tool restore
       - name: F# style (no mutation, discarded results or null)
         run: .github/scripts/check_fsharp_style.sh
-      - name: Style guide matches Ulberg/todo
-        run: curl -sSfL https://raw.githubusercontent.com/Ulberg/todo/main/docs/fsharp-style.md | diff -u - docs/fsharp-style.md
+      - name: Style guide matches todo (same owner)
+        run: curl -sSfL https://raw.githubusercontent.com/${{ github.repository_owner }}/todo/main/docs/fsharp-style.md | diff -u - docs/fsharp-style.md
       - name: Format (Fantomas)
         run: dotnet fantomas --check stacks tests
       - name: Build (warnings are errors)
