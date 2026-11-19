@@ -415,17 +415,55 @@ type Ruleset =
         requiredChecks: string list
     }
 
-type Collaborator = { repo: RepoName; person: Person }
+type TeamPermission =
+    | Push
+    | Maintain
+
+/// A GitHub team in the organization, with its members and what it may do in which repo.
+type Team =
+    {
+        slug: string
+        description: string
+        members: Person list
+        repos: (RepoName * TeamPermission) list
+    }
+
+module Team =
+    /// The code owners of `repo`: `@<org>/<repo>-leads` in its CODEOWNERS.
+    let leadsOf (repo: RepoName) = $"{RepoName.value repo}-leads"
+
+type OrgRole =
+    | OrgMember
+    | OrgAdmin
+
+/// Membership in the GitHub organization. Only the bootstrap owner is an admin.
+type OrgMembership = { person: Person; role: OrgRole }
 
 /// An environment that already exists in GitHub. `branchPolicyId` is its existing `main` branch
-/// policy, which is imported rather than created.
+/// policy, which is imported rather than created. `reviewers`: the team that approves its runs.
 type Environment =
     {
         repo: RepoName
         name: string
         branchPolicyId: int
-        reviewers: Person list
+        reviewers: string option
     }
+
+/// What members of the organization may do on their own (D43). Repos, forks and access come from code.
+type OrgDefaults =
+    {
+        baseRepositoryPermission: string
+        membersCanCreateRepositories: bool
+        membersCanForkPrivateRepositories: bool
+    }
+
+module OrgDefaults =
+    let locked =
+        {
+            baseRepositoryPermission = "none"
+            membersCanCreateRepositories = false
+            membersCanForkPrivateRepositories = false
+        }
 
 // ---------------------------------------------------------------------------------------------
 // CI identities: who may get an Azure token from GitHub Actions
@@ -537,7 +575,9 @@ type Plan =
         roleAssignments: RoleGrant list
         conditionalAccess: CaPolicy list
         rulesets: Ruleset list
-        collaborators: Collaborator list
+        teams: Team list
+        orgMemberships: OrgMembership list
+        orgDefaults: OrgDefaults
         environments: Environment list
         /// Who gets PIM emails: every activation and every new assignment of a privileged role (D40).
         alertEmails: Email list
@@ -597,23 +637,54 @@ let private rulesets (access: Access) =
         |> Result.requireSome $"no required checks defined for repo '{RepoName.value repo}'"
         |> Result.map (fun checks -> { repo = repo; requiredChecks = checks }))
 
-/// Everyone who works in a repo, except the owner (who already has full access to their own repos).
-let private collaborators (owner: GitHubHandle) (access: Access) =
-    [
-        for KeyValue(repo, leads) in access.repoLeads do
-            let developers =
-                if repo = RepoName.platform then
-                    access.infraDevelopers
-                else
-                    access.infraDevelopers @ access.appDevelopers
+/// Leads maintain their repo; infra developers push to every repo, app developers to every app repo.
+let private teams (access: Access) =
+    let repos = access.repoLeads |> Map.keys |> List.ofSeq
+    let appRepos = repos |> List.filter ((<>) RepoName.platform)
 
-            for person in leads @ developers |> List.distinct do
-                if not (GitHubHandle.same person.github owner) then
-                    { repo = repo; person = person }
+    let leads =
+        [
+            for KeyValue(repo, leads) in access.repoLeads ->
+                {
+                    slug = Team.leadsOf repo
+                    description = $"Code owners of {RepoName.value repo}: approve and merge (people.yaml repo-leads)"
+                    members = leads
+                    repos = [ repo, Maintain ]
+                }
+        ]
+
+    leads
+    @ [
+        {
+            slug = "infra-developers"
+            description = "Infra developers (people.yaml groups)"
+            members = access.infraDevelopers
+            repos = repos |> List.map (fun r -> r, Push)
+        }
+        {
+            slug = "app-developers"
+            description = "App developers (people.yaml groups)"
+            members = access.appDevelopers
+            repos = appRepos |> List.map (fun r -> r, Push)
+        }
+    ]
+
+/// Everyone in people.yaml is a member of the organization; only the bootstrap owner is an admin.
+let private orgMemberships (orgAdmin: GitHubHandle) (access: Access) =
+    [
+        for person in access.people ->
+            {
+                person = person
+                role =
+                    if GitHubHandle.same person.github orgAdmin then
+                        OrgAdmin
+                    else
+                        OrgMember
+            }
     ]
 
 let plan
-    (owner: GitHubHandle)
+    (orgAdmin: GitHubHandle)
     (caState: CaState option)
     (alertEmails: Email list)
     (tenantDomain: string)
@@ -683,7 +754,9 @@ let plan
                     ]
                 conditionalAccess = conditionalAccess caState access
                 rulesets = rulesets
-                collaborators = collaborators owner access
+                teams = teams access
+                orgMemberships = orgMemberships orgAdmin access
+                orgDefaults = OrgDefaults.locked
                 // Applies need a platform lead's approval; app releases (the pr-bot) run from main only.
                 environments =
                     [
@@ -691,13 +764,13 @@ let plan
                             repo = RepoName.platform
                             name = "dev"
                             branchPolicyId = 65981291
-                            reviewers = access.platformLeads
+                            reviewers = Some(Team.leadsOf RepoName.platform)
                         }
                         {
                             repo = todo
                             name = "release"
                             branchPolicyId = 65981293
-                            reviewers = []
+                            reviewers = None
                         }
                     ]
                 alertEmails = alertEmails

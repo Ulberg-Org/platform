@@ -259,16 +259,46 @@ let tests =
                     "group licences"
             }
 
-            test "the owner is never added as a collaborator" {
+            test "teams: leads maintain their repo, infra developers push everywhere, app developers to app repos" {
+                let teams =
+                    (planWith None).teams
+                    |> List.map (fun t ->
+                        t.slug,
+                        t.members |> List.map Person.key,
+                        t.repos |> List.map (fun (r, p) -> RepoName.value r, p))
+
+                Expect.equal
+                    teams
+                    [
+                        "platform-leads", [ "ann" ], [ "platform", Maintain ]
+                        "todo-leads", [ "ann"; "bob" ], [ "todo", Maintain ]
+                        "infra-developers", [ "ann" ], [ "platform", Push; "todo", Push ]
+                        "app-developers", [ "ann"; "bob" ], [ "todo", Push ]
+                    ]
+                    "teams"
+            }
+
+            test "everyone is an org member; only the bootstrap owner is an admin" {
                 let plan =
                     Desired.plan (github "Ann-GH") None alertEmails "example.onmicrosoft.com" ciTrusts (parsed valid)
                     |> ok
 
-                let collaborators =
-                    plan.collaborators
-                    |> List.map (fun c -> RepoName.value c.repo, Person.key c.person)
+                Expect.equal
+                    (plan.orgMemberships |> List.map (fun m -> Person.key m.person, m.role))
+                    [ "ann", OrgAdmin; "bob", OrgMember ]
+                    "memberships"
+            }
 
-                Expect.equal collaborators [ "todo", "bob" ] "only bob, only on todo"
+            test "the dev environment is approved by the platform leads' team; members can't create repos" {
+                let plan = planWith None
+
+                Expect.equal
+                    (plan.environments |> List.map (fun e -> e.name, e.reviewers))
+                    [ "dev", Some "platform-leads"; "release", None ]
+                    "reviewers"
+
+                Expect.equal plan.orgDefaults.baseRepositoryPermission "none" "base permission"
+                Expect.isFalse plan.orgDefaults.membersCanCreateRepositories "no self-made repos"
             }
 
             test "a repo without required checks is an error, not a ruleset without checks" {

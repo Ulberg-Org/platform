@@ -6,7 +6,7 @@ Infrastructure and platform for the `todo` showcase (Azure, Entra, AKS, ArgoCD, 
 - Changes are applied only by CI, after approval from a platform lead.
 - People, groups and repo leads are defined as code in `access/`.
 
-See `AGENTS.md` for the working rules and `Ulberg/todo/PLAN.md` for the overall plan.
+See `AGENTS.md` for the working rules and `Ulberg-Org/todo/PLAN.md` for the overall plan.
 
 ## Layout
 

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Instructions for every agent (and human) working in this repository. Read this file before doing anything. The plan for the whole system lives in `Ulberg/todo/PLAN.md` (sections 2, 5, 7, 9 and 12 cover this repo).
+Instructions for every agent (and human) working in this repository. Read this file before doing anything. The plan for the whole system lives in `Ulberg-Org/todo/PLAN.md` (sections 2, 5, 7, 9 and 12 cover this repo).
 
 ## 1. Prompt log (`.prompts/`) — mandatory
 

@@ -3,34 +3,30 @@ module Platform.Access.Tests.CodeownersTests
 open System.IO
 open Expecto
 open Platform.Access
+open Platform.Access.People
 open Platform.Access.Tests.Fixtures
 
 [<Tests>]
 let tests =
-    let access = parsed valid
-    let todoLeads = access.repoLeads[repo "todo"]
+    let org = github "Org"
 
     testList
         "CODEOWNERS"
         [
-            test "gives the whole repo to its leads" {
-                Expect.stringEnds (Codeowners.expected todoLeads) "\n* @ann-gh @bob-gh\n" "owners line"
+            test "gives the whole repo to its leads' team" {
+                Expect.stringEnds (Codeowners.expected org (repo "todo")) "\n* @Org/todo-leads\n" "owners line"
             }
 
             test "a matching file passes" {
                 Expect.equal
-                    (Codeowners.check [ repo "todo", todoLeads, Some(Codeowners.expected todoLeads) ])
+                    (Codeowners.check org [ repo "todo", Some(Codeowners.expected org (repo "todo")) ])
                     (Ok())
                     "ok"
             }
 
             test "a missing or different file names the repo and the expected content" {
                 let result =
-                    Codeowners.check
-                        [
-                            repo "todo", todoLeads, None
-                            repo "platform", access.platformLeads, Some "* @someone"
-                        ]
+                    Codeowners.check org [ repo "todo", None; repo "platform", Some "* @someone" ]
 
                 match result with
                 | Error [ todo; platform ] ->
@@ -39,13 +35,19 @@ let tests =
                 | other -> failtestf "expected two errors, got %A" other
             }
 
-            test "the committed access/people.yaml and platform CODEOWNERS agree" {
-                let access =
-                    File.ReadAllText(Path.Combine(platformRoot, "access", "people.yaml")) |> parsed
+            test "the committed platform CODEOWNERS names the stack's organization" {
+                let config =
+                    File.ReadAllText(Path.Combine(platformRoot, "stacks", "access", "Pulumi.main.yaml"))
+
+                let org =
+                    config.Split '\n'
+                    |> Array.find (fun l -> l.Trim().StartsWith "github:owner:")
+                    |> fun l -> (l.Split(':', 3)[2]).Trim()
+                    |> github
 
                 let committed =
                     File.ReadAllText(Path.Combine(platformRoot, ".github", "CODEOWNERS"))
 
-                Expect.equal committed (Codeowners.expected access.platformLeads) "platform CODEOWNERS"
+                Expect.equal committed (Codeowners.expected org RepoName.platform) "platform CODEOWNERS"
             }
         ]
