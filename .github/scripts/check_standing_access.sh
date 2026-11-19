@@ -4,7 +4,9 @@
 #   - Privileged Role Administrator (can grant Global Admin): nobody;
 #   - Owner or User Access Administrator on the subscription, including inherited from above: only the
 #     emergency accounts;
-#   - tenant defaults (D42): members can't create security groups, apps or tenants,
+#   - nobody but the apply identity created a group or app: Entra makes whoever creates one its owner, so
+#     any other owner means it was made outside Pulumi (D42 detection, independent of enforcement);
+#   - tenant defaults (D42): members can't create groups (security or Microsoft 365), apps or tenants,
 #     consent to apps, invite guests, join by email domain or sign up for trials.
 # PIM activations are not standing access and are ignored. Runs in the pulumi workflow as the read-only
 # preview identity, on every PR, on main and every night, so a role added outside PIM fails a check.
@@ -37,6 +39,18 @@ for role in Owner "User Access Administrator"; do
   report "$role on the subscription" "$(not_allowed "$holders" "$emergency")"
 done
 
+# Groups and apps with any owner other than the apply identity (names, then the other owners).
+apply_identity=$(az ad sp list --display-name id-platform-apply --query "[0].id" -o tsv)
+[ -n "$apply_identity" ] || { echo "Service principal id-platform-apply not found" >&2; exit 1; }
+for kind in groups applications; do
+  while IFS= read -r line; do
+    [ -n "$line" ] && problems+=("$kind made outside Pulumi: $line")
+  done < <(az rest --method GET --url "$graph/$kind?\$select=displayName&\$expand=owners(\$select=id)&\$top=999" -o json |
+    jq -r --arg ok "$apply_identity" \
+      '.value[] | [.owners[].id | select(. != $ok)] as $other | select($other | length > 0)
+       | "\(.displayName) (owners: \($other | join(", ")))"')
+done
+
 # The same values as Desired.TenantDefaults.locked. az prints booleans in lowercase.
 defaults=$(az rest --method GET --url "$graph/policies/authorizationPolicy" --query "join(' ', [
   to_string(defaultUserRolePermissions.allowedToCreateSecurityGroups),
@@ -48,11 +62,14 @@ defaults=$(az rest --method GET --url "$graph/policies/authorizationPolicy" --qu
   to_string(allowedToSignUpEmailBasedSubscriptions)])" -o tsv)
 [ "$defaults" = "false false false 0 adminsAndGuestInviters false false" ] ||
   problems+=("tenant authorization policy: members may create, consent or invite ($defaults)")
+m365=$(az rest --method GET --url "$graph/groupSettings" \
+  --query "value[?templateId=='62375ab9-6b52-47ed-826b-58e47e0e304b'].values[] | [?name=='EnableGroupCreation'].value | [0]" -o tsv)
+[ "$m365" = "false" ] || problems+=("Microsoft 365 group creation: members may create groups (${m365:-not set})")
 
 if [ ${#problems[@]} -gt 0 ]; then
-  echo "Standing privileged access outside PIM, or tenant defaults that allow members to create:" >&2
+  echo "Standing privileged access outside PIM, groups or apps made outside Pulumi, or tenant defaults that allow members to create:" >&2
   printf '  %s\n' "${problems[@]}" >&2
   echo "Remove it, or make it PIM-eligible through access/people.yaml." >&2
   exit 1
 fi
-echo "Standing access ok: Global Admin, Owner and User Access Administrator are held only by the emergency accounts, and members can't create anything on their own"
+echo "Standing access ok: Global Admin, Owner and User Access Administrator are held only by the emergency accounts, no group or app was made outside Pulumi, and members can't create anything on their own"
