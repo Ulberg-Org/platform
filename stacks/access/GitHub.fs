@@ -86,10 +86,16 @@ let private team (t: Desired.Team) =
         CustomResourceOptions(DeleteBeforeReplace = true)
     )
 
-let private teamMember (teams: Map<string, Pulumi.Github.Team>) (t: Desired.Team) (p: Person) =
+/// GitHub always makes organization admins maintainers of every team they're in, so they are declared as
+/// maintainers; declaring "member" would be reverted by GitHub and show as a change on every run.
+let private teamMember (teams: Map<string, Pulumi.Github.Team>) (orgAdmins: Person list) (t: Desired.Team) (p: Person) =
     TeamMembership(
         $"{t.slug}-{Person.key p}",
-        TeamMembershipArgs(TeamId = teams[t.slug].Id, Username = GitHubHandle.value p.github, Role = "member")
+        TeamMembershipArgs(
+            TeamId = teams[t.slug].Id,
+            Username = GitHubHandle.value p.github,
+            Role = (if List.contains p orgAdmins then "maintainer" else "member")
+        )
     )
 
 let private teamRepo
@@ -198,7 +204,14 @@ let deploy (orgSettingsScript: string) (org: GitHubHandle) (plan: Plan) : Deploy
     {
         rulesets = plan.rulesets |> List.map ruleset
         teams = teams
-        teamMembers = plan.teams |> List.collect (fun t -> t.members |> List.map (teamMember teams t))
+        teamMembers =
+            let admins =
+                plan.orgMemberships
+                |> List.filter (fun m -> m.role = OrgAdmin)
+                |> List.map _.person
+
+            plan.teams
+            |> List.collect (fun t -> t.members |> List.map (teamMember teams admins t))
         teamRepos = plan.teams |> List.collect (fun t -> t.repos |> List.map (teamRepo teams t))
         orgMemberships = plan.orgMemberships |> List.map orgMembership
         environments = plan.environments |> List.map (environment teams)
