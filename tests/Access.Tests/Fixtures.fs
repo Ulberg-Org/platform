@@ -35,3 +35,10 @@ let platformRoot = Path.Combine(__SOURCE_DIRECTORY__, "..", "..")
 
 let alertEmails =
     Email.parseList "alerts" (Some "lead@example.com, second@example.org") |> ok
+
+/// The personal account's prefix (credentials made by bootstrap.sh) and the organization's.
+let ciTrusts =
+    Platform.Access.Desired.CiTrust.parse
+        """[ { "name": "github", "repoPrefix": "repo:Owner@1/platform@9", "madeBy": "bootstrap" },
+             { "name": "github-org", "repoPrefix": "repo:Org@2/platform@9" } ]"""
+    |> ok
