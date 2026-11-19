@@ -31,6 +31,30 @@ let matches (pattern: Regex) (field: string) (s: string) : Result<string, string
     else
         Error $"'{field}': '{s}' is not valid"
 
+let between (field: string) (low: int) (high: int) (n: int) : Result<int, string> =
+    if n >= low && n <= high then
+        Ok n
+    else
+        Error $"'{field}': {n} is not between {low} and {high}"
+
+let atLeast (field: string) (low: int) (n: int) : Result<int, string> =
+    if n >= low then
+        Ok n
+    else
+        Error $"'{field}': {n} is below {low}"
+
+let startsWith (field: string) (prefix: string) (s: string) : Result<string, string> =
+    if s.StartsWith prefix then
+        Ok s
+    else
+        Error $"'{field}': '{s}' must start with {prefix}"
+
+let equals (field: string) (expected: string) (s: string) : Result<unit, string> =
+    if s = expected then
+        Ok()
+    else
+        Error $"'{field}': '{s}' is not {expected}"
+
 /// Prefixes every error with where it happened, e.g. "groups.app-developers: unknown person 'carl'".
 let within (context: string) (v: Validation<'a, string>) : Validation<'a, string> =
     v |> Validation.mapError (fun e -> $"{context}: {e}")

@@ -72,53 +72,51 @@ type App =
 /// D57: never fewer than two instances, so nothing can rely on being the only one.
 let minimumReplicas = 2
 
-let private path field (s: string) =
-    if s.StartsWith "/" then
-        Ok s
-    else
-        Error $"'{field}': '{s}' must start with /"
+/// One parser per field of a platform.yaml, so `service` and `parse` below read as a list of fields.
+module private Field =
+    let port = Parse.between "port" 1 65535
+
+    let minReplicas (r: ReplicasDto) =
+        Parse.atLeast "replicas.min" minimumReplicas r.min
+        |> Result.mapError (fun e -> $"{e} (D57)")
+
+    let maxReplicas (r: ReplicasDto) =
+        Parse.atLeast "replicas.max" r.min r.max
+
+    let path field = Parse.startsWith field "/"
+
+    let routes (routes: string list option) =
+        routes
+        |> Option.defaultValue []
+        |> List.traverseResultA (path "routes")
+        |> Result.mapError (String.concat "; ")
+
+    /// A service may only use a database the app declares.
+    let database (declared: Name list) (database: string option) =
+        match database with
+        | None -> Ok None
+        | Some db ->
+            declared
+            |> List.tryFind (Name.value >> (=) db)
+            |> Result.requireSome $"'database': '{db}' is not declared under databases"
+            |> Result.map Some
+
+    let engine (key: string, db: DatabaseDto) =
+        Parse.equals $"databases.{key}.engine" "postgres" db.engine
+        |> Result.bind (fun () -> Name.parse "databases" key)
 
 let private service (databases: Name list) (d: ServiceDto) : Validation<Service, string> =
     validation {
         let! name = Name.parse "name" d.name
         and! build = Parse.notEmpty "build" d.build
         and! image = Parse.notEmpty "image" d.image
-
-        and! port =
-            if d.port >= 1 && d.port <= 65535 then
-                Ok d.port
-            else
-                Error $"'port': {d.port} is not a port"
-
-        and! minReplicas =
-            if d.replicas.min >= minimumReplicas then
-                Ok d.replicas.min
-            else
-                Error $"'replicas.min': {d.replicas.min} is below {minimumReplicas} (D57)"
-
-        and! maxReplicas =
-            if d.replicas.max >= d.replicas.min then
-                Ok d.replicas.max
-            else
-                Error $"'replicas.max': {d.replicas.max} is below min"
-
-        and! live = path "health.live" d.health.live
-        and! ready = path "health.ready" d.health.ready
-
-        and! routes =
-            d.routes
-            |> Option.defaultValue []
-            |> List.traverseResultA (path "routes")
-            |> Result.mapError (String.concat "; ")
-
-        and! database =
-            match d.database with
-            | None -> Ok None
-            | Some db ->
-                databases
-                |> List.tryFind (fun n -> Name.value n = db)
-                |> Option.map Some
-                |> Result.requireSome $"'database': '{db}' is not declared under databases"
+        and! port = Field.port d.port
+        and! minReplicas = Field.minReplicas d.replicas
+        and! maxReplicas = Field.maxReplicas d.replicas
+        and! live = Field.path "health.live" d.health.live
+        and! ready = Field.path "health.ready" d.health.ready
+        and! routes = Field.routes d.routes
+        and! database = Field.database databases d.database
 
         return
             {
@@ -143,23 +141,14 @@ let parse (yaml: string) : Validation<App, string> =
     Parse.yaml<AppDto> yaml
     |> Validation.bind (fun d ->
         validation {
-            let! _ =
-                if d.apiVersion = "platform/v1" then
-                    Ok()
-                else
-                    Error $"'apiVersion': '{d.apiVersion}' is not platform/v1"
-
+            let! () = Parse.equals "apiVersion" "platform/v1" d.apiVersion
             and! name = Name.parse "app" d.app
 
             and! databases =
                 d.databases
                 |> Option.defaultValue Map.empty
                 |> Map.toList
-                |> List.traverseValidationA (fun (key, db) ->
-                    if db.engine = "postgres" then
-                        Name.parse "databases" key |> Validation.ofResult
-                    else
-                        Validation.error $"databases.{key}: engine '{db.engine}' is not supported (postgres)")
+                |> List.traverseValidationA (Field.engine >> Validation.ofResult)
 
             let! services = d.services |> List.traverseValidationA (service databases)
 
