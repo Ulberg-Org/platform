@@ -411,7 +411,7 @@ let private requiredChecks =
                 "dotnet (format, build, test)"
                 "pulumi preview"
             ]
-            "todo", [ "secret scan (gitleaks)"; "prompt log"; "fsharp style" ]
+            "todo", [ "secret scan (gitleaks)"; "prompt log"; "fsharp style"; "backend (format, build, test)" ]
         ]
 
 type Ruleset =
