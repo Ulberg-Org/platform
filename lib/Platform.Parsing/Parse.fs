@@ -1,7 +1,7 @@
 /// Small, reusable parsers for turning DTO fields into domain values. Each returns a Result with a
 /// message; callers combine them with FsToolkit's Validation so every problem is reported at once.
 /// See docs/fsharp-style.md.
-module Platform.Access.Parse
+module Platform.Parse
 
 open System
 open System.Text.Json
@@ -35,8 +35,12 @@ let matches (pattern: Regex) (field: string) (s: string) : Result<string, string
 let within (context: string) (v: Validation<'a, string>) : Validation<'a, string> =
     v |> Validation.mapError (fun e -> $"{context}: {e}")
 
+// YAML scalars arrive as strings after the YAML → JSON step, so numbers are also read from strings.
 let private json =
-    JsonSerializerOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)
+    JsonSerializerOptions(
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString
+    )
 
 /// Reads YAML into a DTO: YAML → plain data → JSON → DTO. System.Text.Json maps F# records, options,
 /// lists and maps natively and rejects unknown keys, so a misspelled section is an error, not ignored.

@@ -3,6 +3,8 @@
 /// here instead of producing half an access setup.
 module Platform.Access.People
 
+open Platform
+
 open System
 open System.IO
 open System.Text.RegularExpressions

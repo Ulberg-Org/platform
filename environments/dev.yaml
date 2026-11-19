@@ -1,0 +1,13 @@
+# The dev environment in Azure (D45, D61): on demand, rendered from the same model as local (D60).
+name: dev
+mode: release
+registry: crplatform21784576.azurecr.io
+kubernetesVersion: "1.37"
+database:
+  # Postgres Flexible Server, private access (§9.1). The host is set when Phase 3 creates it.
+  host: todo-dev.postgres.database.azure.com
+  port: 5432
+telemetryEndpoint: http://collector.observability:4317
+gateway:
+  name: platform
+  namespace: gateway

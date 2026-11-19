@@ -2,6 +2,8 @@
 /// Only this file and the deploy functions have effects; everything they act on is computed by pure code.
 module Platform.Access.Program
 
+open Platform
+
 open System.IO
 open System.Threading.Tasks
 open FsToolkit.ErrorHandling
