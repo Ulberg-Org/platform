@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Regression test for Claude's agent accounts (D41), against the real tenant. Each agent in
 # access/people.yaml must hold exactly its read roles:
-#   - Azure: Reader, Monitoring Reader, Log Analytics Reader, Cost Management Reader (via platform-agents);
+#   - Azure: Reader, Monitoring Reader, Log Analytics Reader, Cost Management Reader on the subscription
+#     (via platform-agents), plus, on the Claude GitHub App key only, Key Vault Crypto User (D52: sign);
 #   - Entra roles: Security Reader, active; nothing eligible;
 #   - PIM for Groups: no eligibility, neither for the account nor for platform-agents;
 #   - groups: platform-agents only (so it inherits nothing).
@@ -11,7 +12,12 @@ set -euo pipefail
 graph=https://graph.microsoft.com/v1.0
 domain=$(yq '.config["access:tenantDomain"]' stacks/access/Pulumi.main.yaml)
 agents=$(yq '.agents // [] | .[]' access/people.yaml)
-azure_roles=$'Cost Management Reader\nLog Analytics Reader\nMonitoring Reader\nReader'
+sub=/subscriptions/${AZURE_SUBSCRIPTION_ID:?}
+azure_roles=$(printf '%s @ '"$sub"'\n' "Cost Management Reader" "Log Analytics Reader" "Monitoring Reader" "Reader")
+# D52: may sign with the Claude GitHub App key, and with nothing else in the vault.
+vault=$(yq '.config["access:keyVault"]' stacks/access/Pulumi.main.yaml)
+vault_rg=$(yq '.config["access:ciIdentityResourceGroup"]' stacks/access/Pulumi.main.yaml)
+app_key_signer="Key Vault Crypto User @ $sub/resourceGroups/$vault_rg/providers/Microsoft.KeyVault/vaults/$vault/keys/claude-github-app"
 security_reader=5d6b6bb7-de71-4623-b4af-96380a352509
 
 problems=()
@@ -42,7 +48,8 @@ for key in $agents; do
 
   expect "$upn: Azure roles" \
     "$(az role assignment list --all --assignee "$id" --include-groups --include-inherited \
-      --query "[].roleDefinitionName" -o tsv)" "$azure_roles"
+      --query "[].join(' @ ', [roleDefinitionName, scope])" -o tsv | grep -vxF "$app_key_signer" || true)" \
+    "$azure_roles"
   expect "$upn: active Entra roles" \
     "$(az rest --method GET \
       --url "$graph/roleManagement/directory/roleAssignmentSchedules?\$filter=principalId%20eq%20'$id'" \

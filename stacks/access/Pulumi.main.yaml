@@ -13,6 +13,8 @@ config:
   # GitHub OIDC subjects the CI identities trust: <owner>@<owner-id>/<repo>@<repo-id> (GitHub's immutable
   # form, so a renamed or recreated repo doesn't match).
   access:ciIdentityResourceGroup: rg-platform-state
+  # Holds the Pulumi secrets key and the Claude GitHub App's signing key (D52).
+  access:keyVault: kv-platform-21784576
   access:ciTrust:
     - name: github-org
       repoPrefix: repo:Ulberg-Org@358725408/platform@1450696781

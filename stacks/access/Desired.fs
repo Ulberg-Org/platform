@@ -564,6 +564,19 @@ let federatedCredentials (trusts: CiTrust list) : FederatedCredential list =
     ]
 
 // ---------------------------------------------------------------------------------------------
+// Claude's GitHub identity (D52)
+
+/// The Claude GitHub App's private key: a Key Vault key that may only sign. `signers` may sign with it, to
+/// mint 1 h installation tokens; nobody can read it, so the app's identity can't leave Key Vault.
+type ClaudeAppKey = { keyName: string; signers: GroupName }
+
+let claudeAppKey =
+    {
+        keyName = "claude-github-app"
+        signers = PlatformAgents
+    }
+
+// ---------------------------------------------------------------------------------------------
 // The plan
 
 type Plan =
