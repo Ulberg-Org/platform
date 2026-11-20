@@ -3,10 +3,14 @@ name: dev
 mode: release
 registry: crplatform21784576.azurecr.io
 kubernetesVersion: "1.37"
+git: https://github.com/Ulberg-Org
+components: [ argocd, gateway ]
 database:
   # Postgres Flexible Server, private access (§9.1), one per database. {app} and {database} are filled in.
   host: "{app}-{database}-dev.postgres.database.azure.com"
   port: 5432
+  # The database subnet (D70): name-based rules need a paid AKS add-on, so services reach it by address range.
+  range: 10.20.2.0/24
 telemetryEndpoint: http://collector.observability:4317
 gateway:
   name: platform

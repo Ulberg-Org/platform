@@ -1,0 +1,16 @@
+# Argo CD in every environment. Per environment: values-<environment>.yaml.
+dex:
+  enabled: false
+notifications:
+  enabled: false
+applicationSet:
+  replicas: 0
+configs:
+  # The `platform` plugin (D68): the renderer, in a sidecar of the repo server (values-<environment>.yaml
+  # says which image). MODE, ENVIRONMENT and TAG come from the Application (Cluster.fs).
+  cmp:
+    create: true
+    plugins:
+      platform:
+        generate:
+          command: [dotnet, /app/Platform.Renderer.dll, argocd]

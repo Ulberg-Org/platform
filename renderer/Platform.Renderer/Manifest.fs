@@ -19,6 +19,17 @@ let items = Items
 let optional (fs: (string * Node option) list) =
     fs |> List.choose (fun (key, value) -> value |> Option.map (fun v -> key, v))
 
+/// A Kubernetes object: its kind, its metadata fields, then the rest (usually `spec`).
+let resource (apiVersion: string) (kind: string) (metadata: (string * Node) list) (rest: (string * Node) list) =
+    Fields(
+        [
+            "apiVersion", Text apiVersion
+            "kind", Text kind
+            "metadata", Fields metadata
+        ]
+        @ rest
+    )
+
 /// One manifest file: its name in the output folder and its content.
 type Manifest = { file: string; content: Node }
 
@@ -34,3 +45,7 @@ let rec private toObj (node: Node) : obj =
 /// booleans are quoted, so a port given as text (as Cilium requires) stays text.
 let toYaml (node: Node) : string =
     SerializerBuilder().WithQuotingNecessaryStrings().Build().Serialize(toObj node)
+
+/// Several manifests as one YAML stream, as Argo CD reads a plugin's output.
+let toStream (manifests: Manifest list) : string =
+    manifests |> List.map (fun m -> toYaml m.content) |> String.concat "---\n"

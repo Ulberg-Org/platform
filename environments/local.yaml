@@ -5,11 +5,15 @@ name: local
 mode: develop
 # The same minor version as AKS (D61); kind's node image may be an earlier patch.
 kubernetesVersion: "1.37"
+# Argo CD reads snapshots of the checkouts from the git server in the cluster (D68).
+git: git://git.gitops.svc.cluster.local
+components: [ argocd, gateway, gitops ]
 database:
   # Postgres runs outside the cluster, as in Azure: one container per database on kind's Docker network.
   # {app} and {database} are filled in by the renderer.
   host: "{app}-{database}"
   port: 5432
+  # No range: services reach the database by name, which Cilium allows by inspecting DNS (D70).
 telemetryEndpoint: http://collector.observability:4317
 gateway:
   name: platform

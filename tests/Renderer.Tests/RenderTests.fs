@@ -67,13 +67,7 @@ let tests =
                 Expect.isFalse (dev["backend-deployment.yaml"].Contains "hostPath") "no source mount in the cloud"
 
                 // Everything that isn't the environment's business is identical.
-                for file in
-                    [
-                        "backend-service.yaml"
-                        "backend-route.yaml"
-                        "network-deny-all.yaml"
-                        "namespace.yaml"
-                    ] do
+                for file in [ "backend-service.yaml"; "backend-route.yaml" ] do
                     Expect.equal local[file] dev[file] file
             }
 
@@ -81,18 +75,22 @@ let tests =
                 let deployment = (rendered "dev")["backend-deployment.yaml"]
                 Expect.stringContains deployment "replicas: 2" "two instances"
                 Expect.stringContains deployment "topologyKey: kubernetes.io/hostname" "spread over nodes"
+                Expect.stringContains deployment "nodeTaintsPolicy: Honor" "only nodes it can run on count"
+                Expect.stringContains deployment "startupProbe:" "a slow start is not a restart"
                 Expect.stringContains deployment "runAsNonRoot: true" "non-root"
                 Expect.stringContains deployment "allowPrivilegeEscalation: false" "no escalation"
                 Expect.stringContains deployment "- ALL" "no capabilities"
             }
 
-            test "deny by default; only a service that declares the database may reach it, by name" {
+            test "only a service that declares the database may reach it: by name locally, by range in Azure (D70)" {
                 let local = rendered "local"
-                Expect.stringContains local["network-deny-all.yaml"] "podSelector: {}" "every pod"
                 Expect.stringContains local["backend-network.yaml"] "matchName: todo-todo" "the database"
+                Expect.stringContains local["backend-network.yaml"] "matchPattern: '*'" "DNS inspected"
                 Expect.isFalse (local["worker-network.yaml"].Contains "toFQDNs") "the worker has no database"
                 let dev = rendered "dev"
-                Expect.stringContains dev["backend-network.yaml"] "todo-todo-dev.postgres.database.azure.com" "Azure's"
+                Expect.stringContains dev["backend-network.yaml"] "- 10.20.2.0/24" "the database subnet"
+                Expect.isFalse (dev["backend-network.yaml"].Contains "toFQDNs") "no names (paid add-on in AKS)"
+                Expect.isFalse (dev["backend-network.yaml"].Contains "matchPattern") "no DNS inspection"
             }
 
             test "routes go through the gateway; a service without routes gets none" {

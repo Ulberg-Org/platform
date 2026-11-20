@@ -80,12 +80,15 @@ let private selector (s: Service) = fields [ "matchLabels", nameLabel s ]
 let private inNamespace (ns: string) =
     fields [ "matchLabels", fields [ "k8s:io.kubernetes.pod.namespace", text ns ] ]
 
+let private httpGet (path: string) (port: int) =
+    "httpGet", fields [ "path", text path; "port", Number port ]
+
 let private probe (path: string) (port: int) =
-    fields
-        [
-            "httpGet", fields [ "path", text path; "port", Number port ]
-            "periodSeconds", Number 5
-        ]
+    fields [ httpGet path port; "periodSeconds", Number 5 ]
+
+/// Liveness only starts once the app has started, so a slow start (the SDK compiling, D61) is never a restart.
+let private startupProbe (path: string) (port: int) =
+    fields [ httpGet path port; "periodSeconds", Number 2; "failureThreshold", Number 90 ]
 
 let private variable (name: string) (value: string) =
     fields [ "name", text name; "value", text value ]
@@ -132,6 +135,7 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
                 "imagePullPolicy", text runtime.pullPolicy
                 "ports", items [ fields [ "containerPort", Number s.port ] ]
                 "env", items ([ instanceName; telemetry ] @ database)
+                "startupProbe", startupProbe s.live s.port
                 "livenessProbe", probe s.live s.port
                 "readinessProbe", probe s.ready s.port
                 "resources", resources
@@ -154,6 +158,8 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
                 "maxSkew", Number 1
                 "topologyKey", text "kubernetes.io/hostname"
                 "whenUnsatisfiable", text "DoNotSchedule"
+                // Nodes the service can't run on (tainted: the control plane, AKS's system pool) don't count.
+                "nodeTaintsPolicy", text "Honor"
                 "labelSelector", selector s
             ]
 
@@ -234,26 +240,6 @@ let private route (app: App) (environment: Environment) (s: Service) =
                 ]
     }
 
-/// Deny by default (AGENTS.md §2): nothing in the app's namespace talks to or from anything unless a rule
-/// below allows it.
-let private denyAll (app: App) =
-    {
-        file = "network-deny-all.yaml"
-        content =
-            fields
-                [
-                    "apiVersion", text "networking.k8s.io/v1"
-                    "kind", text "NetworkPolicy"
-                    metadata "deny-all" (Name.value app.name) []
-                    "spec",
-                    fields
-                        [
-                            "podSelector", fields []
-                            "policyTypes", items [ text "Ingress"; text "Egress" ]
-                        ]
-                ]
-    }
-
 /// A port rule; Cilium wants the port as text.
 let private tcp (port: int) =
     items
@@ -263,6 +249,23 @@ let private tcp (port: int) =
                     "ports", items [ fields [ "port", text (string port); "protocol", text "TCP" ] ]
                 ]
         ]
+
+/// DNS, inspected when the database is allowed by name: Cilium learns the name's addresses from the answers.
+let private dnsPorts (environment: Environment) =
+    let port = "ports", items [ fields [ "port", text "53"; "protocol", text "ANY" ] ]
+
+    let inspect =
+        "rules", fields [ "dns", items [ fields [ "matchPattern", text "*" ] ] ]
+
+    match environment.databaseAccess with
+    | ByName -> fields [ port; inspect ]
+    | ByRange _ -> fields [ port ]
+
+/// Where a service's database is, as the network rule names it (D70).
+let private databasePeer (environment: Environment) (app: App) (db: Name) =
+    match environment.databaseAccess with
+    | ByName -> "toFQDNs", items [ fields [ "matchName", text (databaseHost environment app db) ] ]
+    | ByRange cidr -> "toCIDR", items [ text cidr ]
 
 /// What a service may talk to (§9.1): in from the gateway on its port; out to DNS, to the telemetry collector
 /// and, only if it declares one, to its database.
@@ -287,27 +290,15 @@ let private networkRules (app: App) (environment: Environment) (s: Service) =
                     ]
             ]
 
-    // DNS is inspected, so the database rule can allow it by name.
-    let inspectedDns =
-        fields
-            [
-                "ports", items [ fields [ "port", text "53"; "protocol", text "ANY" ] ]
-                "rules", fields [ "dns", items [ fields [ "matchPattern", text "*" ] ] ]
-            ]
-
     let toDns =
-        fields [ "toEndpoints", items [ kubeDns ]; "toPorts", items [ inspectedDns ] ]
+        fields [ "toEndpoints", items [ kubeDns ]; "toPorts", items [ dnsPorts environment ] ]
 
     let toTelemetry =
         fields [ "toEndpoints", items [ inNamespace "observability" ]; "toPorts", tcp 4317 ]
 
     // The database is outside the cluster, locally and in Azure (D61).
     let toDatabase (db: Name) =
-        fields
-            [
-                "toFQDNs", items [ fields [ "matchName", text (databaseHost environment app db) ] ]
-                "toPorts", tcp environment.databasePort
-            ]
+        fields [ databasePeer environment app db; "toPorts", tcp environment.databasePort ]
 
     let database = s.database |> Option.map toDatabase |> Option.toList
 
@@ -329,18 +320,6 @@ let private networkRules (app: App) (environment: Environment) (s: Service) =
                 ]
     }
 
-let private ns (app: App) =
-    {
-        file = "namespace.yaml"
-        content =
-            fields
-                [
-                    "apiVersion", text "v1"
-                    "kind", text "Namespace"
-                    "metadata", fields [ "name", text (Name.value app.name) ]
-                ]
-    }
-
 /// A service's manifests; a service without routes gets no route.
 let private serviceManifests (app: App) (environment: Environment) (tag: string) (s: Service) =
     let route =
@@ -353,10 +332,10 @@ let private serviceManifests (app: App) (environment: Environment) (tag: string)
     @ Option.toList route
     @ [ networkRules app environment s ]
 
-/// Every manifest for `app` in `environment`; `tag` is the image tag (the commit SHA) in release mode.
+/// Every manifest for `app` in `environment`; `tag` is the image tag (the commit SHA) in release mode. The app's
+/// namespace and its deny-all rule belong to the platform (Cluster.fs), so an app can't remove them.
 let render (app: App) (environment: Environment) (tag: string) : Manifest list =
-    [ ns app; denyAll app ]
-    @ List.collect (serviceManifests app environment tag) app.services
+    List.collect (serviceManifests app environment tag) app.services
 
 type PlannedService =
     {

@@ -1,0 +1,29 @@
+# Argo CD locally (D61): nobody signs in to it (the platform CLI reports the sync state); the renderer image is
+# built from the checkout by the CLI. Azure gets SSO and the published renderer image (Phase 4).
+configs:
+  params:
+    server.insecure: true
+  cm:
+    # The CLI asks for a refresh after every change; this is the fallback.
+    timeout.reconciliation: 60s
+repoServer:
+  extraContainers:
+    - name: platform
+      image: platform/renderer:dev
+      imagePullPolicy: Never
+      command: [/var/run/argocd/argocd-cmp-server]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: { drop: [ ALL ] }
+        seccompProfile: { type: RuntimeDefault }
+      volumeMounts:
+        - { name: var-files, mountPath: /var/run/argocd }
+        - { name: plugins, mountPath: /home/argocd/cmp-server/plugins }
+        - { name: argocd-cmp-cm, mountPath: /home/argocd/cmp-server/config/plugin.yaml, subPath: platform.yaml }
+        - { name: cmp-tmp, mountPath: /tmp }
+  volumes:
+    - { name: argocd-cmp-cm, configMap: { name: argocd-cmp-cm } }
+    - { name: cmp-tmp, emptyDir: {} }
