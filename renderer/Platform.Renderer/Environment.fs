@@ -30,6 +30,7 @@ type Environment =
         name: string
         mode: Mode
         kubernetesVersion: string
+        /// The database's host, with {app} and {database} placeholders (see databaseHost in Render.fs).
         databaseHost: string
         databasePort: int
         telemetryEndpoint: string
@@ -37,20 +38,23 @@ type Environment =
         gatewayNamespace: string
     }
 
+module private Field =
+    /// Release mode needs the registry its images come from; develop builds locally and takes none.
+    let mode (mode: string) (registry: string option) =
+        match mode, registry with
+        | "develop", None -> Ok Develop
+        | "release", Some registry -> Ok(Release registry)
+        | "develop", Some _ -> Error "'registry': develop mode builds locally and takes no registry"
+        | "release", None -> Error "'registry' is required in release mode"
+        | other, _ -> Error $"'mode': '{other}' is not develop or release"
+
 let parse (yaml: string) : Validation<Environment, string> =
     Parse.yaml<EnvironmentDto> yaml
     |> Validation.bind (fun d ->
         validation {
             let! name = Parse.notEmpty "name" d.name
 
-            and! mode =
-                match d.mode, d.registry with
-                | "develop", None -> Ok Develop
-                | "release", Some registry -> Ok(Release registry)
-                | "develop", Some _ -> Error "'registry': develop mode builds locally and takes no registry"
-                | "release", None -> Error "'registry' is required in release mode"
-                | other, _ -> Error $"'mode': '{other}' is not develop or release"
-
+            and! mode = Field.mode d.mode d.registry
             and! kubernetesVersion = Parse.notEmpty "kubernetesVersion" d.kubernetesVersion
             and! databaseHost = Parse.notEmpty "database.host" d.database.host
             and! telemetryEndpoint = Parse.notEmpty "telemetryEndpoint" d.telemetryEndpoint

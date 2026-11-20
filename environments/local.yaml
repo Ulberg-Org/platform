@@ -6,8 +6,9 @@ mode: develop
 # The same minor version as AKS (D61); kind's node image may be an earlier patch.
 kubernetesVersion: "1.37"
 database:
-  # Postgres runs outside the cluster, as in Azure (a container on kind's Docker network).
-  host: todo-postgres
+  # Postgres runs outside the cluster, as in Azure: one container per database on kind's Docker network.
+  # {app} and {database} are filled in by the renderer.
+  host: "{app}-{database}"
   port: 5432
 telemetryEndpoint: http://collector.observability:4317
 gateway:

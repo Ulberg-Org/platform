@@ -22,7 +22,7 @@ let main argv =
                     Environment.parse environmentYaml
                     |> Validation.mapError (fun e -> $"{environmentFile}: {e}")
 
-                return Render.render app environment tag
+                return Render.render app environment tag, Render.plan app environment tag
             }
 
         match rendered with
@@ -30,12 +30,16 @@ let main argv =
             // 4. Report
             problems |> List.iter (eprintfn "%s")
             1
-        | Ok manifests ->
+        | Ok(manifests, plan) ->
             // 3. Action
-            Directory.CreateDirectory output |> ignore
+            let manifestFolder = Path.Combine(output, "manifests")
+            Directory.CreateDirectory manifestFolder |> ignore
 
             for m in manifests do
-                File.WriteAllText(Path.Combine(output, m.file), Manifest.toYaml m.content)
+                File.WriteAllText(Path.Combine(manifestFolder, m.file), Manifest.toYaml m.content)
+
+            // Next to the manifests folder, so applying that folder never picks it up.
+            File.WriteAllText(Path.Combine(output, "plan.json"), System.Text.Json.JsonSerializer.Serialize plan)
 
             // 4. Report
             printfn "Rendered %d manifests into %s" manifests.Length output

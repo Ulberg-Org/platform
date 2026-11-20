@@ -89,10 +89,10 @@ let tests =
             test "deny by default; only a service that declares the database may reach it, by name" {
                 let local = rendered "local"
                 Expect.stringContains local["network-deny-all.yaml"] "podSelector: {}" "every pod"
-                Expect.stringContains local["backend-network.yaml"] "matchName: todo-postgres" "the database"
+                Expect.stringContains local["backend-network.yaml"] "matchName: todo-todo" "the database"
                 Expect.isFalse (local["worker-network.yaml"].Contains "toFQDNs") "the worker has no database"
                 let dev = rendered "dev"
-                Expect.stringContains dev["backend-network.yaml"] "postgres.database.azure.com" "Azure's"
+                Expect.stringContains dev["backend-network.yaml"] "todo-todo-dev.postgres.database.azure.com" "Azure's"
             }
 
             test "routes go through the gateway; a service without routes gets none" {
