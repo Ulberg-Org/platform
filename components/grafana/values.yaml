@@ -13,6 +13,9 @@ datasources:
         type: prometheus
         url: http://prometheus-server
         isDefault: true
+        jsonData:
+          # A metric's exemplar (a sample request) opens its trace in Tempo.
+          exemplarTraceIdDestinations: [ { name: trace_id, datasourceUid: tempo } ]
       - name: Loki
         uid: loki
         type: loki
@@ -38,6 +41,10 @@ datasources:
           serviceMap: { datasourceUid: prometheus }
           nodeGraph: { enabled: true }
 testFramework: { enabled: false }
+# Grafana's Drilldown apps (Grafana Labs' own): browse logs, traces and metrics without writing queries, the way
+# most teams start an investigation.
+# Pinned (D65), past the cooldown.
+plugins: [ grafana-lokiexplore-app@3.1.0, grafana-exploretraces-app@3.2.0, grafana-metricsdrilldown-app@3.1.0 ]
 # Dashboards and alert rules as code (D71): the sidecar loads the ConfigMaps in common/ (labelled grafana_dashboard
 # and grafana_alert) when Grafana starts and whenever they change.
 sidecar:

@@ -111,6 +111,16 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
         variableFrom "INSTANCE_NAME" ("fieldRef", fields [ "fieldPath", text "metadata.name" ])
 
     let telemetry = variable "OTEL_EXPORTER_OTLP_ENDPOINT" environment.telemetryEndpoint
+
+    // One name for the service in traces, metrics and logs (D71, OpenTelemetry's Kubernetes conventions): its
+    // name within its app, as on its pods' labels, from which the collector names its pod logs the same way.
+    let serviceName = variable "OTEL_SERVICE_NAME" name
+
+    let resource =
+        variable
+            "OTEL_RESOURCE_ATTRIBUTES"
+            $"service.namespace={Name.value app.name},deployment.environment.name={environment.name}"
+
     let database = s.database |> Option.map connectionString |> Option.toList
 
     let resources =
@@ -134,7 +144,7 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
                 "image", text (image app environment s tag)
                 "imagePullPolicy", text runtime.pullPolicy
                 "ports", items [ fields [ "containerPort", Number s.port ] ]
-                "env", items ([ instanceName; telemetry ] @ database)
+                "env", items ([ instanceName; telemetry; serviceName; resource ] @ database)
                 "startupProbe", startupProbe s.live s.healthPort
                 "livenessProbe", probe s.live s.healthPort
                 "readinessProbe", probe s.ready s.healthPort
@@ -173,8 +183,16 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
             @ optional [ "volumes", runtime.volumes ]
         )
 
+    // The service sends its own logs (OTLP), so the collector keeps only what it writes outside its logger
+    // (crashes, the SDK's compiler output) from its pod logs, not every line twice.
+    let annotations = fields [ "telemetry.platform/logs", text "otlp" ]
+
     let template =
-        fields [ "metadata", fields [ "labels", fields (labels app s) ]; "spec", pod ]
+        fields
+            [
+                "metadata", fields [ "labels", fields (labels app s); "annotations", annotations ]
+                "spec", pod
+            ]
 
     {
         file = $"{name}-deployment.yaml"

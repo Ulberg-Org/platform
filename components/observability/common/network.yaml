@@ -33,3 +33,20 @@ metadata:
 spec:
   from: [ { group: gateway.envoyproxy.io, kind: EnvoyProxy, namespace: gateway } ]
   to: [ { group: "", kind: Service, name: collector } ]
+---
+# Grafana downloads its plugins (the Drilldown apps) from grafana.com, which serves the archives from Google Cloud
+# Storage: over HTTPS, by name, for Grafana only.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: grafana-plugins
+  namespace: observability
+spec:
+  endpointSelector:
+    matchLabels: { app.kubernetes.io/name: grafana }
+  egress:
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, k8s-app: kube-dns }
+      toPorts: [ { ports: [ { port: "53", protocol: ANY } ], rules: { dns: [ { matchPattern: "*" } ] } } ]
+    - toFQDNs: [ { matchName: grafana.com }, { matchPattern: "*.grafana.com" }, { matchPattern: "*.grafana.net" }, { matchName: storage.googleapis.com } ]
+      toPorts: [ { ports: [ { port: "443", protocol: TCP } ] } ]

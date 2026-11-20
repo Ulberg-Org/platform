@@ -3,12 +3,15 @@ server:
   extraFlags:
     - web.enable-otlp-receiver
     - web.enable-remote-write-receiver
+    # Exemplars: a sample request's trace ID on a metric, so a spike opens its trace (D71).
+    - enable-feature=exemplar-storage
   retention: 2d
   persistentVolume: { enabled: false }
   # OTLP resource attributes Prometheus keeps as labels, so app metrics can be filtered like traces and logs.
   otlp:
     promote_resource_attributes:
       - service.name
+      - service.namespace
       - service.instance.id
       - deployment.environment.name
 # The chart's config reloader (v0.95) has no arm64 build yet; v0.94.0 has. Back to the chart's own when it does.

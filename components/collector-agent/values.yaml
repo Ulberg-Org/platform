@@ -23,13 +23,30 @@ config:
     zipkin: null
     prometheus: null
     otlp: null
+  processors:
+    # Pod logs named like the services' own telemetry (D71, OpenTelemetry's Kubernetes conventions): service.name
+    # from the pod's app.kubernetes.io/name, service.namespace (the app) from app.kubernetes.io/part-of.
+    k8sattributes:
+      extract:
+        labels:
+          - { tag_name: service.name, key: app.kubernetes.io/name, from: pod }
+          - { tag_name: service.namespace, key: app.kubernetes.io/part-of, from: pod }
+        annotations:
+          - { tag_name: telemetry.logs, key: telemetry.platform/logs, from: pod }
+    # A service that sends its own logs (the renderer marks its pods) would appear twice: its logger's lines (JSON)
+    # are dropped here, everything else it prints (crashes, compiler output) stays.
+    filter/own-logs:
+      error_mode: ignore
+      logs:
+        log_record:
+          - 'resource.attributes["telemetry.logs"] == "otlp" and IsMatch(body, "^\\s*\\{")'
   exporters:
     otlp_grpc/collector:
       endpoint: collector:4317
       tls: { insecure: true }
   service:
     pipelines:
-      logs: { receivers: [ filelog ], processors: [ k8sattributes, memory_limiter, batch ], exporters: [ otlp_grpc/collector ] }
+      logs: { receivers: [ filelog ], processors: [ k8sattributes, filter/own-logs, memory_limiter, batch ], exporters: [ otlp_grpc/collector ] }
       traces: null
       metrics: null
 securityContext:
