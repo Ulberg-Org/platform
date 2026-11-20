@@ -27,27 +27,16 @@ env:
   AZURE_TOKEN_CREDENTIALS: AzureCLICredential
 
 jobs:
-  preview:
-    name: pulumi preview
-    # One queue per branch: a newer push cancels its outdated preview, but PRs never cancel each other and
-    # never wait behind an apply that is waiting for approval. If an apply is running at that moment,
-    # Pulumi's state lock refuses the preview, which then fails visibly and can be rerun.
-    concurrency:
-      group: pulumi-preview-${{ github.ref }}
-      cancel-in-progress: true
-    # Dependabot runs get no OIDC token or secrets. It only bumps GitHub Actions versions.
+  # The drift and standing-access checks, next to the stack previews (they don't depend on each other).
+  checks:
+    name: access checks
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    env:
-      ARM_CLIENT_ID: ${{ vars.AZURE_PREVIEW_CLIENT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          global-json-file: global.json
       - name: Azure sign-in (read-only preview identity)
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
@@ -74,6 +63,45 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.github.outputs.token }}
         run: .github/scripts/check_github_access.sh
+
+  preview:
+    name: pulumi preview (stacks)
+    # One queue per branch: a newer push cancels its outdated preview, but PRs never cancel each other and
+    # never wait behind an apply that is waiting for approval. If an apply is running at that moment,
+    # Pulumi's state lock refuses the preview, which then fails visibly and can be rerun.
+    concurrency:
+      group: pulumi-preview-${{ github.ref }}
+      cancel-in-progress: true
+    # Dependabot runs get no OIDC token or secrets. It only bumps GitHub Actions versions.
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_PREVIEW_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+          # Packages restored from the cache, keyed on the lock files (D65).
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+      - name: Azure sign-in (read-only preview identity)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_PREVIEW_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: GitHub token (read-only app)
+        id: github
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.PLATFORM_READER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PLATFORM_READER_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: platform,todo
       - uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
         with:
           command: preview
@@ -101,6 +129,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.github.outputs.token }}
 
+  # The required check (`pulumi preview` in the ruleset). It fails explicitly unless both jobs succeeded: a job
+  # that was skipped because another failed would otherwise count as passed.
+  gate:
+    name: pulumi preview
+    needs: [ checks, preview ]
+    if: always() && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[ "${{ needs.checks.result }}" = success ] && [ "${{ needs.preview.result }}" = success ]'
+
   apply:
     name: pulumi up
     # Applies run one at a time and are never cancelled halfway through.
@@ -108,7 +146,7 @@ jobs:
       group: pulumi-apply
       cancel-in-progress: false
     if: github.event_name == 'push'
-    needs: preview
+    needs: gate
     runs-on: ubuntu-latest
     environment: dev
     permissions:
@@ -121,6 +159,9 @@ jobs:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
+          # Packages restored from the cache, keyed on the lock files (D65).
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
       - name: Azure sign-in (apply identity, dev environment only)
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
