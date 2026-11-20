@@ -8,4 +8,8 @@ tempo:
   metricsGenerator:
     enabled: true
     remoteWriteUrl: http://prometheus-server/api/v1/write
+  overrides:
+    defaults:
+      metrics_generator:
+        processors: [ service-graphs, span-metrics ]
 persistence: { enabled: false }

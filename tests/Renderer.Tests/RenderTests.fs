@@ -142,6 +142,13 @@ let tests =
                 Expect.isTrue (Render.plan (App.parse app |> ok) (environment "local") "dev").networkFlows "in the plan"
             }
 
+            test "every service is named the same in traces, metrics and logs: its name within its app (D71)" {
+                let deployment = (rendered "local")["backend-deployment.yaml"]
+                Expect.stringContains deployment "value: backend" "OTEL_SERVICE_NAME"
+                Expect.stringContains deployment "service.namespace=todo,deployment.environment.name=local" "the app"
+                Expect.stringContains deployment "telemetry.platform/logs: otlp" "its own logs, not twice"
+            }
+
             test "local and dev pin the same Kubernetes minor version (D61)" {
                 Expect.equal (environment "local").kubernetesVersion (environment "dev").kubernetesVersion "1.37"
             }

@@ -32,4 +32,4 @@ config:
         service.name: network-flows
   service:
     pipelines:
-      logs: { receivers: [ filelog, filelog/audit, filelog/network ], processors: [ k8sattributes, memory_limiter, batch ], exporters: [ otlp_grpc/collector ] }
+      logs: { receivers: [ filelog, filelog/audit, filelog/network ], processors: [ k8sattributes, filter/own-logs, memory_limiter, batch ], exporters: [ otlp_grpc/collector ] }
