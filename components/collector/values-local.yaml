@@ -1,6 +1,11 @@
 # Locally the collector also reads Postgres's own log (D61): the platform CLI's database containers write it as
 # JSON to <app repo>/.local/postgres/<host>, which the workers see at /src/.local/postgres. In Azure the
 # Flexible Server's logs come from Azure (Phase 5).
+# Postgres's metrics (D64), as the monitor role from the platform CLI's Secret.
+extraEnvs:
+  - { name: PG_ENDPOINT, valueFrom: { secretKeyRef: { name: postgres-monitor, key: endpoint } } }
+  - { name: PG_USERNAME, valueFrom: { secretKeyRef: { name: postgres-monitor, key: username } } }
+  - { name: PG_PASSWORD, valueFrom: { secretKeyRef: { name: postgres-monitor, key: password } } }
 extraVolumes:
   - name: postgres-logs
     hostPath: { path: /src/.local/postgres, type: DirectoryOrCreate }
@@ -20,6 +25,12 @@ config:
           to: body
       resource:
         service.name: postgres
+    postgresql:
+      endpoint: ${env:PG_ENDPOINT}
+      username: ${env:PG_USERNAME}
+      password: ${env:PG_PASSWORD}
+      tls: { insecure: true }
+      collection_interval: 30s
   processors:
     resource:
       attributes:
@@ -28,3 +39,4 @@ config:
     pipelines:
       logs:
         receivers: [ otlp, filelog/postgres ]
+      metrics: { receivers: [ otlp, postgresql ], processors: [ memory_limiter, resource, batch ], exporters: [ otlp_http/prometheus ] }

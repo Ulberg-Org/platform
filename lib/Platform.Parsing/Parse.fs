@@ -22,6 +22,13 @@ let present (field: string) (s: string) : Result<string, string> =
     else
         Ok s
 
+/// A YAML `true` or `false` (the YAML reader hands every value over as text).
+let flag (field: string) (s: string) : Result<bool, string> =
+    match s with
+    | "true" -> Ok true
+    | "false" -> Ok false
+    | other -> Error $"'{field}': '{other}' is not true or false"
+
 let notEmpty (field: string) (s: string) : Result<string, string> =
     if String.IsNullOrWhiteSpace s then
         Error $"'{field}' is empty"

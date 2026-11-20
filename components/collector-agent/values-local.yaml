@@ -6,8 +6,12 @@ podSecurityContext: { runAsUser: 0, runAsGroup: 0 }
 extraVolumes:
   - name: audit
     hostPath: { path: /var/log/kubernetes/audit, type: DirectoryOrCreate }
+  # Hubble's dropped flows (D71), which Cilium writes on every node.
+  - name: hubble
+    hostPath: { path: /var/run/cilium/hubble, type: DirectoryOrCreate }
 extraVolumeMounts:
   - { name: audit, mountPath: /var/log/kubernetes/audit, readOnly: true }
+  - { name: hubble, mountPath: /var/run/cilium/hubble, readOnly: true }
 config:
   receivers:
     filelog/audit:
@@ -18,6 +22,14 @@ config:
           timestamp: { parse_from: attributes.requestReceivedTimestamp, layout_type: gotime, layout: "2006-01-02T15:04:05.999999999Z07:00" }
       resource:
         service.name: kubernetes-audit
+    filelog/network:
+      include: [ /var/run/cilium/hubble/events.log ]
+      start_at: beginning
+      operators:
+        - type: json_parser
+          timestamp: { parse_from: attributes.time, layout_type: gotime, layout: "2006-01-02T15:04:05.999999999Z07:00" }
+      resource:
+        service.name: network-flows
   service:
     pipelines:
-      logs: { receivers: [ filelog, filelog/audit ], processors: [ k8sattributes, memory_limiter, batch ], exporters: [ otlp_grpc/collector ] }
+      logs: { receivers: [ filelog, filelog/audit, filelog/network ], processors: [ k8sattributes, memory_limiter, batch ], exporters: [ otlp_grpc/collector ] }

@@ -24,6 +24,7 @@ type EnvironmentDto =
         registry: string option
         git: string
         components: string list
+        networkFlows: string
         database: DatabaseDto
         telemetryEndpoint: string
         gateway: GatewayDto
@@ -50,6 +51,9 @@ type Environment =
         git: string
         /// The platform components Argo CD runs here (`components/<name>`), besides the apps.
         components: Name list
+        /// Whether the network's decisions (allowed and dropped flows) are recorded (D71): Hubble locally, AKS's
+        /// Advanced Container Networking Services in Azure (decided in Phase 3).
+        networkFlows: bool
         /// The database's host, with {app} and {database} placeholders (see databaseHost in Render.fs).
         databaseHost: string
         databasePort: int
@@ -90,6 +94,7 @@ let parse (yaml: string) : Validation<Environment, string> =
             and! kubernetesVersion = Parse.notEmpty "kubernetesVersion" d.kubernetesVersion
             and! git = Parse.notEmpty "git" d.git
             and! components = Field.components d.components
+            and! networkFlows = Parse.flag "networkFlows" d.networkFlows
             and! databaseHost = Parse.notEmpty "database.host" d.database.host
             and! databaseAccess = Field.databaseAccess d.database.range
             and! telemetryEndpoint = Parse.notEmpty "telemetryEndpoint" d.telemetryEndpoint
@@ -101,6 +106,7 @@ let parse (yaml: string) : Validation<Environment, string> =
                     kubernetesVersion = kubernetesVersion
                     git = git
                     components = components
+                    networkFlows = networkFlows
                     databaseHost = databaseHost
                     databasePort = d.database.port
                     databaseAccess = databaseAccess

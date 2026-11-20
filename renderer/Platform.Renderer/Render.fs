@@ -355,6 +355,8 @@ type Plan =
         app: string
         services: PlannedService list
         databases: PlannedDatabase list
+        /// Whether the bootstrap turns on Cilium's flow logs (Hubble), from the environment (D71).
+        networkFlows: bool
     }
 
 let plan (app: App) (environment: Environment) (tag: string) : Plan =
@@ -376,4 +378,5 @@ let plan (app: App) (environment: Environment) (tag: string) : Plan =
         app = Name.value app.name
         services = app.services |> List.map plannedService
         databases = app.databases |> List.map plannedDatabase
+        networkFlows = environment.networkFlows
     }

@@ -11,6 +11,10 @@ spec:
   endpointSelector: {}
   ingress:
     - fromEndpoints: [ {} ]
+    # Prometheus reads Argo CD's metrics (D71).
+    - fromEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": observability }
+      toPorts: [ { ports: [ { port: "8082", protocol: TCP }, { port: "8083", protocol: TCP }, { port: "8084", protocol: TCP } ] } ]
   egress:
     - toEndpoints: [ {} ]
     - toEntities: [ kube-apiserver ]
