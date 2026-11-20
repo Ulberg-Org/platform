@@ -10,6 +10,59 @@ open Platform.Renderer.Manifest
 let databaseHost (environment: Environment) (app: App) (database: Name) =
     environment.databaseHost.Replace("{app}", Name.value app.name).Replace("{database}", Name.value database)
 
+/// The image this environment runs: the app's `dev` target built locally (develop), or the commit's signed
+/// image from the registry (release, D54).
+let private image (app: App) (environment: Environment) (s: Service) (tag: string) =
+    match environment.mode with
+    | Develop -> $"{Name.value app.name}/{Name.value s.name}:dev"
+    | Release registry -> $"{registry}/{s.image}:{tag}"
+
+/// How a container runs in this environment, decided once so the manifests below never branch on the mode.
+/// Develop (D61): the source mounted for hot reload, and a writable filesystem and no memory cap for the SDK
+/// compiling. Release: read-only and capped.
+type private Runtime =
+    {
+        pullPolicy: string
+        readOnlyRoot: bool
+        memoryLimit: Node option
+        mounts: Node option
+        volumes: Node option
+    }
+
+let private runtime (environment: Environment) (s: Service) =
+    match environment.mode with
+    | Develop ->
+        {
+            pullPolicy = "Never"
+            readOnlyRoot = false
+            memoryLimit = None
+            mounts =
+                Some(
+                    items
+                        [
+                            fields [ "name", text "source"; "mountPath", text "/src"; "readOnly", Flag true ]
+                            fields [ "name", text "scratch"; "mountPath", text "/tmp" ]
+                        ]
+                )
+            volumes =
+                Some(
+                    items
+                        [
+                            // The app repo, mounted into every kind node by the platform CLI.
+                            fields [ "name", text "source"; "hostPath", fields [ "path", text "/src" ] ]
+                            fields [ "name", text "scratch"; "emptyDir", fields [] ]
+                        ]
+                )
+        }
+    | Release _ ->
+        {
+            pullPolicy = "IfNotPresent"
+            readOnlyRoot = true
+            memoryLimit = Some(fields [ "memory", text s.memory ])
+            mounts = None
+            volumes = None
+        }
+
 let private metadata (name: string) (ns: string) (labels: (string * Node) list) =
     "metadata", fields [ "name", text name; "namespace", text ns; "labels", fields labels ]
 
@@ -19,15 +72,13 @@ let private labels (app: App) (s: Service) =
         "app.kubernetes.io/part-of", text (Name.value app.name)
     ]
 
-let private selector (s: Service) =
+let private nameLabel (s: Service) =
     fields [ "app.kubernetes.io/name", text (Name.value s.name) ]
 
-/// The image this environment runs: the app's `dev` target built locally (develop), or the commit's signed
-/// image from the registry (release, D54).
-let private image (app: App) (env: Environment) (s: Service) (tag: string) =
-    match env.mode with
-    | Develop -> $"{Name.value app.name}/{Name.value s.name}:dev"
-    | Release registry -> $"{registry}/{s.image}:{tag}"
+let private selector (s: Service) = fields [ "matchLabels", nameLabel s ]
+
+let private inNamespace (ns: string) =
+    fields [ "matchLabels", fields [ "k8s:io.kubernetes.pod.namespace", text ns ] ]
 
 let private probe (path: string) (port: int) =
     fields
@@ -36,97 +87,88 @@ let private probe (path: string) (port: int) =
             "periodSeconds", Number 5
         ]
 
-let private env (app: App) (environment: Environment) (s: Service) =
-    items
-        [
-            yield
-                fields
-                    [
-                        "name", text "INSTANCE_NAME"
-                        "valueFrom", fields [ "fieldRef", fields [ "fieldPath", text "metadata.name" ] ]
-                    ]
-            yield
-                fields
-                    [
-                        "name", text "OTEL_EXPORTER_OTLP_ENDPOINT"
-                        "value", text environment.telemetryEndpoint
-                    ]
-            match s.database with
-            | Some db ->
-                // The connection string (with a password locally, an Entra identity in Azure) comes from a
-                // Secret the platform creates for the app's role (§9.2); the app only names its database.
-                yield
-                    fields
-                        [
-                            "name", text "Database__ConnectionString"
-                            "valueFrom",
-                            fields
-                                [
-                                    "secretKeyRef",
-                                    fields [ "name", text $"{Name.value db}-app"; "key", text "connectionString" ]
-                                ]
-                        ]
-            | None -> ()
-        ]
+let private variable (name: string) (value: string) =
+    fields [ "name", text name; "value", text value ]
+
+let private variableFrom (name: string) (source: string * Node) =
+    fields [ "name", text name; "valueFrom", fields [ source ] ]
+
+/// The connection string (with a password locally, an Entra identity in Azure) comes from a Secret the platform
+/// creates for the app's role (§9.2); the app only names its database.
+let private connectionString (db: Name) =
+    variableFrom
+        "Database__ConnectionString"
+        ("secretKeyRef", fields [ "name", text $"{Name.value db}-app"; "key", text "connectionString" ])
 
 let private deployment (app: App) (environment: Environment) (tag: string) (s: Service) =
-    let develop = environment.mode = Develop
     let name = Name.value s.name
+    let runtime = runtime environment s
 
-    let container =
+    let instanceName =
+        variableFrom "INSTANCE_NAME" ("fieldRef", fields [ "fieldPath", text "metadata.name" ])
+
+    let telemetry = variable "OTEL_EXPORTER_OTLP_ENDPOINT" environment.telemetryEndpoint
+    let database = s.database |> Option.map connectionString |> Option.toList
+
+    let resources =
+        fields (
+            [ "requests", fields [ "cpu", text s.cpu; "memory", text s.memory ] ]
+            @ optional [ "limits", runtime.memoryLimit ]
+        )
+
+    let containerSecurity =
         fields
             [
-                yield "name", text name
-                yield "image", text (image app environment s tag)
-                yield "imagePullPolicy", text (if develop then "Never" else "IfNotPresent")
-                yield "ports", items [ fields [ "containerPort", Number s.port ] ]
-                yield "env", env app environment s
-                yield "livenessProbe", probe s.live s.port
-                yield "readinessProbe", probe s.ready s.port
-
-                yield
-                    "resources",
-                    fields
-                        [
-                            yield "requests", fields [ "cpu", text s.cpu; "memory", text s.memory ]
-                            // The SDK compiling with hot reload needs far more than the app; release is capped.
-                            if not develop then
-                                yield "limits", fields [ "memory", text s.memory ]
-                        ]
-
-                yield
-                    "securityContext",
-                    fields
-                        [
-                            "allowPrivilegeEscalation", Flag false
-                            // The SDK writes build output while developing; release images write nothing.
-                            "readOnlyRootFilesystem", Flag(not develop)
-                            "capabilities", fields [ "drop", items [ text "ALL" ] ]
-                        ]
-
-                if develop then
-                    yield
-                        "volumeMounts",
-                        items
-                            [
-                                fields [ "name", text "source"; "mountPath", text "/src"; "readOnly", Flag true ]
-                                fields [ "name", text "scratch"; "mountPath", text "/tmp" ]
-                            ]
+                "allowPrivilegeEscalation", Flag false
+                "readOnlyRootFilesystem", Flag runtime.readOnlyRoot
+                "capabilities", fields [ "drop", items [ text "ALL" ] ]
             ]
 
-    let volumes =
-        if develop then
+    let container =
+        fields (
             [
-                "volumes",
-                items
-                    [
-                        // The app repo, mounted into every kind node by the platform CLI (D61: hot reload).
-                        fields [ "name", text "source"; "hostPath", fields [ "path", text "/src" ] ]
-                        fields [ "name", text "scratch"; "emptyDir", fields [] ]
-                    ]
+                "name", text name
+                "image", text (image app environment s tag)
+                "imagePullPolicy", text runtime.pullPolicy
+                "ports", items [ fields [ "containerPort", Number s.port ] ]
+                "env", items ([ instanceName; telemetry ] @ database)
+                "livenessProbe", probe s.live s.port
+                "readinessProbe", probe s.ready s.port
+                "resources", resources
+                "securityContext", containerSecurity
             ]
-        else
-            []
+            @ optional [ "volumeMounts", runtime.mounts ]
+        )
+
+    let podSecurity =
+        fields
+            [
+                "runAsNonRoot", Flag true
+                "seccompProfile", fields [ "type", text "RuntimeDefault" ]
+            ]
+
+    // D57: the instances sit on different nodes, so one node failing never takes the service down.
+    let spread =
+        fields
+            [
+                "maxSkew", Number 1
+                "topologyKey", text "kubernetes.io/hostname"
+                "whenUnsatisfiable", text "DoNotSchedule"
+                "labelSelector", selector s
+            ]
+
+    let pod =
+        fields (
+            [
+                "securityContext", podSecurity
+                "topologySpreadConstraints", items [ spread ]
+                "containers", items [ container ]
+            ]
+            @ optional [ "volumes", runtime.volumes ]
+        )
+
+    let template =
+        fields [ "metadata", fields [ "labels", fields (labels app s) ]; "spec", pod ]
 
     {
         file = $"{name}-deployment.yaml"
@@ -140,45 +182,15 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
                     fields
                         [
                             "replicas", Number s.minReplicas
-                            "selector", fields [ "matchLabels", selector s ]
-                            "template",
-                            fields
-                                [
-                                    "metadata", fields [ "labels", fields (labels app s) ]
-                                    "spec",
-                                    fields
-                                        [
-                                            yield
-                                                "securityContext",
-                                                fields
-                                                    [
-                                                        "runAsNonRoot", Flag true
-                                                        "seccompProfile", fields [ "type", text "RuntimeDefault" ]
-                                                    ]
-                                            // D57: the instances sit on different nodes, so one node failing
-                                            // never takes the service down.
-                                            yield
-                                                "topologySpreadConstraints",
-                                                items
-                                                    [
-                                                        fields
-                                                            [
-                                                                "maxSkew", Number 1
-                                                                "topologyKey", text "kubernetes.io/hostname"
-                                                                "whenUnsatisfiable", text "DoNotSchedule"
-                                                                "labelSelector", fields [ "matchLabels", selector s ]
-                                                            ]
-                                                    ]
-                                            yield "containers", items [ container ]
-                                            yield! volumes
-                                        ]
-                                ]
+                            "selector", selector s
+                            "template", template
                         ]
                 ]
     }
 
 let private service (app: App) (s: Service) =
     let name = Name.value s.name
+    let port = fields [ "port", Number s.port; "targetPort", Number s.port ]
 
     {
         file = $"{name}-service.yaml"
@@ -188,17 +200,27 @@ let private service (app: App) (s: Service) =
                     "apiVersion", text "v1"
                     "kind", text "Service"
                     metadata name (Name.value app.name) (labels app s)
-                    "spec",
-                    fields
-                        [
-                            "selector", selector s
-                            "ports", items [ fields [ "port", Number s.port; "targetPort", Number s.port ] ]
-                        ]
+                    "spec", fields [ "selector", nameLabel s; "ports", items [ port ] ]
                 ]
     }
 
 let private route (app: App) (environment: Environment) (s: Service) =
     let name = Name.value s.name
+
+    let gateway =
+        fields
+            [
+                "name", text environment.gatewayName
+                "namespace", text environment.gatewayNamespace
+            ]
+
+    let backend = fields [ "name", text name; "port", Number s.port ]
+
+    let rule (path: string) =
+        let prefix =
+            fields [ "path", fields [ "type", text "PathPrefix"; "value", text path ] ]
+
+        fields [ "matches", items [ prefix ]; "backendRefs", items [ backend ] ]
 
     {
         file = $"{name}-route.yaml"
@@ -208,38 +230,7 @@ let private route (app: App) (environment: Environment) (s: Service) =
                     "apiVersion", text "gateway.networking.k8s.io/v1"
                     "kind", text "HTTPRoute"
                     metadata name (Name.value app.name) (labels app s)
-                    "spec",
-                    fields
-                        [
-                            "parentRefs",
-                            items
-                                [
-                                    fields
-                                        [
-                                            "name", text environment.gatewayName
-                                            "namespace", text environment.gatewayNamespace
-                                        ]
-                                ]
-                            "rules",
-                            items
-                                [
-                                    for path in s.routes ->
-                                        fields
-                                            [
-                                                "matches",
-                                                items
-                                                    [
-                                                        fields
-                                                            [
-                                                                "path",
-                                                                fields [ "type", text "PathPrefix"; "value", text path ]
-                                                            ]
-                                                    ]
-                                                "backendRefs",
-                                                items [ fields [ "name", text name; "port", Number s.port ] ]
-                                            ]
-                                ]
-                        ]
+                    "spec", fields [ "parentRefs", items [ gateway ]; "rules", items (s.routes |> List.map rule) ]
                 ]
     }
 
@@ -263,19 +254,62 @@ let private denyAll (app: App) =
                 ]
     }
 
+/// A port rule; Cilium wants the port as text.
+let private tcp (port: int) =
+    items
+        [
+            fields
+                [
+                    "ports", items [ fields [ "port", text (string port); "protocol", text "TCP" ] ]
+                ]
+        ]
+
 /// What a service may talk to (§9.1): in from the gateway on its port; out to DNS, to the telemetry collector
 /// and, only if it declares one, to its database.
 let private networkRules (app: App) (environment: Environment) (s: Service) =
     let name = Name.value s.name
 
-    let port (n: int) =
-        items
+    let fromGateway =
+        fields
             [
+                "fromEndpoints", items [ inNamespace environment.gatewayNamespace ]
+                "toPorts", tcp s.port
+            ]
+
+    let kubeDns =
+        fields
+            [
+                "matchLabels",
                 fields
                     [
-                        "ports", items [ fields [ "port", text (string n); "protocol", text "TCP" ] ]
+                        "k8s:io.kubernetes.pod.namespace", text "kube-system"
+                        "k8s-app", text "kube-dns"
                     ]
             ]
+
+    // DNS is inspected, so the database rule can allow it by name.
+    let inspectedDns =
+        fields
+            [
+                "ports", items [ fields [ "port", text "53"; "protocol", text "ANY" ] ]
+                "rules", fields [ "dns", items [ fields [ "matchPattern", text "*" ] ] ]
+            ]
+
+    let toDns =
+        fields [ "toEndpoints", items [ kubeDns ]; "toPorts", items [ inspectedDns ] ]
+
+    let toTelemetry =
+        fields [ "toEndpoints", items [ inNamespace "observability" ]; "toPorts", tcp 4317 ]
+
+    // The database is outside the cluster, locally and in Azure (D61).
+    let toDatabase (db: Name) =
+        fields
+            [
+                "toFQDNs", items [ fields [ "matchName", text (databaseHost environment app db) ] ]
+                "toPorts", tcp environment.databasePort
+            ]
+
+    let database = s.database |> Option.map toDatabase |> Option.toList
 
     {
         file = $"{name}-network.yaml"
@@ -288,107 +322,9 @@ let private networkRules (app: App) (environment: Environment) (s: Service) =
                     "spec",
                     fields
                         [
-                            "endpointSelector", fields [ "matchLabels", selector s ]
-                            "ingress",
-                            items
-                                [
-                                    fields
-                                        [
-                                            "fromEndpoints",
-                                            items
-                                                [
-                                                    fields
-                                                        [
-                                                            "matchLabels",
-                                                            fields
-                                                                [
-                                                                    "k8s:io.kubernetes.pod.namespace",
-                                                                    text environment.gatewayNamespace
-                                                                ]
-                                                        ]
-                                                ]
-                                            "toPorts", port s.port
-                                        ]
-                                ]
-                            "egress",
-                            items
-                                [
-                                    yield
-                                        fields
-                                            [
-                                                "toEndpoints",
-                                                items
-                                                    [
-                                                        fields
-                                                            [
-                                                                "matchLabels",
-                                                                fields
-                                                                    [
-                                                                        "k8s:io.kubernetes.pod.namespace",
-                                                                        text "kube-system"
-                                                                        "k8s-app", text "kube-dns"
-                                                                    ]
-                                                            ]
-                                                    ]
-                                                "toPorts",
-                                                items
-                                                    [
-                                                        fields
-                                                            [
-                                                                "ports",
-                                                                items
-                                                                    [
-                                                                        fields
-                                                                            [
-                                                                                "port", text "53"
-                                                                                "protocol", text "ANY"
-                                                                            ]
-                                                                    ]
-                                                                // DNS is inspected, so the database rule below can
-                                                                // allow it by name.
-                                                                "rules",
-                                                                fields
-                                                                    [
-                                                                        "dns",
-                                                                        items [ fields [ "matchPattern", text "*" ] ]
-                                                                    ]
-                                                            ]
-                                                    ]
-                                            ]
-                                    yield
-                                        fields
-                                            [
-                                                "toEndpoints",
-                                                items
-                                                    [
-                                                        fields
-                                                            [
-                                                                "matchLabels",
-                                                                fields
-                                                                    [
-                                                                        "k8s:io.kubernetes.pod.namespace",
-                                                                        text "observability"
-                                                                    ]
-                                                            ]
-                                                    ]
-                                                "toPorts", port 4317
-                                            ]
-                                    match s.database with
-                                    | Some db ->
-                                        // The database is outside the cluster, locally and in Azure (D61).
-                                        yield
-                                            fields
-                                                [
-                                                    "toFQDNs",
-                                                    items
-                                                        [
-                                                            fields
-                                                                [ "matchName", text (databaseHost environment app db) ]
-                                                        ]
-                                                    "toPorts", port environment.databasePort
-                                                ]
-                                    | None -> ()
-                                ]
+                            "endpointSelector", selector s
+                            "ingress", items [ fromGateway ]
+                            "egress", items ([ toDns; toTelemetry ] @ database)
                         ]
                 ]
     }
@@ -405,20 +341,22 @@ let private ns (app: App) =
                 ]
     }
 
+/// A service's manifests; a service without routes gets no route.
+let private serviceManifests (app: App) (environment: Environment) (tag: string) (s: Service) =
+    let route =
+        if s.routes.IsEmpty then
+            None
+        else
+            Some(route app environment s)
+
+    [ deployment app environment tag s; service app s ]
+    @ Option.toList route
+    @ [ networkRules app environment s ]
+
 /// Every manifest for `app` in `environment`; `tag` is the image tag (the commit SHA) in release mode.
 let render (app: App) (environment: Environment) (tag: string) : Manifest list =
-    [
-        yield ns app
-        yield denyAll app
-        for s in app.services do
-            yield deployment app environment tag s
-            yield service app s
-
-            if not s.routes.IsEmpty then
-                yield route app environment s
-
-            yield networkRules app environment s
-    ]
+    [ ns app; denyAll app ]
+    @ List.collect (serviceManifests app environment tag) app.services
 
 type PlannedService =
     {
@@ -439,23 +377,21 @@ type Plan =
     }
 
 let plan (app: App) (environment: Environment) (tag: string) : Plan =
+    let plannedService (s: Service) =
+        {
+            name = Name.value s.name
+            build = s.build
+            image = image app environment s tag
+        }
+
+    let plannedDatabase (db: Name) =
+        {
+            name = Name.value db
+            host = databaseHost environment app db
+        }
+
     {
         app = Name.value app.name
-        services =
-            [
-                for s in app.services ->
-                    {
-                        name = Name.value s.name
-                        build = s.build
-                        image = image app environment s tag
-                    }
-            ]
-        databases =
-            [
-                for db in app.databases ->
-                    {
-                        name = Name.value db
-                        host = databaseHost environment app db
-                    }
-            ]
+        services = app.services |> List.map plannedService
+        databases = app.databases |> List.map plannedDatabase
     }

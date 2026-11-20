@@ -15,6 +15,10 @@ let text = Text
 let fields = Fields
 let items = Items
 
+/// The fields that have a value; e.g. `fields ([ ... ] @ optional [ "volumes", volumes ])`.
+let optional (fs: (string * Node option) list) =
+    fs |> List.choose (fun (key, value) -> value |> Option.map (fun v -> key, v))
+
 /// One manifest file: its name in the output folder and its content.
 type Manifest = { file: string; content: Node }
 
