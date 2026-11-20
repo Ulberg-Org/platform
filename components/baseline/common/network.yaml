@@ -1,0 +1,20 @@
+# Every pod is deny-by-default (AGENTS.md §2), including in namespaces nobody wrote rules for (`default`, or one
+# made by hand): it may only look up names. Each namespace's own rules add what its pods need; Cilium adds rules
+# up, so this takes nothing away from them. Not selected: the cluster's own components (kube-system,
+# local-path-storage locally), and Argo CD, which applies the other rules and must never cut itself off (it has
+# its own rule, components/argocd/common/network.yaml).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: baseline
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: NotIn
+        values: [ kube-system, local-path-storage, argocd ]
+  ingress: [ {} ]
+  egress:
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, k8s-app: kube-dns }
+      toPorts: [ { ports: [ { port: "53", protocol: ANY } ] } ]

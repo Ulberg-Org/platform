@@ -342,6 +342,8 @@ type PlannedService =
         name: string
         build: string
         image: string
+        /// The database its network rule allows, if any; the platform's network tests check it (D66).
+        database: string option
     }
 
 type PlannedDatabase = { name: string; host: string }
@@ -361,6 +363,7 @@ let plan (app: App) (environment: Environment) (tag: string) : Plan =
             name = Name.value s.name
             build = s.build
             image = image app environment s tag
+            database = s.database |> Option.map Name.value
         }
 
     let plannedDatabase (db: Name) =

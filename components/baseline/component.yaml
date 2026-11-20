@@ -1,0 +1,2 @@
+# The cluster's network baseline (AGENTS.md §2): every pod is deny-by-default, whatever namespace it's in.
+namespace: default

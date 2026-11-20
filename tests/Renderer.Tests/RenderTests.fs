@@ -129,6 +129,13 @@ let tests =
                     Expect.stringContains all "must start with /" "route"
             }
 
+            test "the plan says which database each service may reach, for the network tests (D66)" {
+                let plan = Render.plan (App.parse app |> ok) (environment "local") "dev"
+                let byName = plan.services |> List.map (fun s -> s.name, s.database) |> Map.ofList
+                Expect.equal byName["backend"] (Some "todo") "the backend's database"
+                Expect.equal byName["worker"] None "the worker has none"
+            }
+
             test "local and dev pin the same Kubernetes minor version (D61)" {
                 Expect.equal (environment "local").kubernetesVersion (environment "dev").kubernetesVersion "1.37"
             }
