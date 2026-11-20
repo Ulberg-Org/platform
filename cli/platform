@@ -251,8 +251,13 @@ EOF
   k -n gitops rollout status deployment/git --timeout=5m >/dev/null
 
   step "Argo CD and its root application (D67)"
-  read -r repo chart version namespace <<<"$(render chart /platform argocd)"
-  h install argocd "$chart" --repo "$repo" --version "$version" -n "$namespace" --create-namespace \
+  # Installed from the package its digest pins (D65), checked here; Argo CD then manages it like any component.
+  read -r repo chart version namespace digest <<<"$(render chart /platform argocd)"
+  rm -rf "$state/charts" && mkdir -p "$state/charts"
+  h pull "$chart" --repo "$repo" --version "$version" -d "$state/charts" >/dev/null
+  [ "sha256:$(shasum -a 256 "$state"/charts/*.tgz | cut -d' ' -f1)" = "$digest" ] ||
+    { echo "Argo CD's chart $chart $version isn't the package components/argocd pins ($digest)" >&2; exit 1; }
+  h install argocd "$state"/charts/*.tgz -n "$namespace" --create-namespace \
     -f "$platform_root/components/argocd/values.yaml" -f "$platform_root/components/argocd/values-local.yaml" \
     --wait --timeout 10m >/dev/null
   k apply -f - >/dev/null <<EOF

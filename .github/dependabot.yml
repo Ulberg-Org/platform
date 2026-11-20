@@ -1,6 +1,23 @@
+# Dependency updates (D65): every ecosystem waits before proposing a new version (patch 7 days, minor 14, major
+# 30), so a bad or hijacked release has time to be caught; security fixes come right away. Everything is pinned
+# by content (lock files, digests, commit SHAs), and Dependabot updates the pins with the versions.
+# Not covered by Dependabot: the platform components' Helm charts (components/*/component.yaml, bumped by hand
+# with the same cooldown; CI checks their digests) and the bootstrap's versions in cli/versions.env.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: weekly
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7, semver-patch-days: 7, semver-minor-days: 14, semver-major-days: 30 }
+  - package-ecosystem: nuget
+    directories: [ /lib/*, /renderer/*, /stacks/*, /tests/* ]
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7, semver-patch-days: 7, semver-minor-days: 14, semver-major-days: 30 }
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7, semver-patch-days: 7, semver-minor-days: 14, semver-major-days: 30 }
+  - package-ecosystem: docker
+    directory: /renderer
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7, semver-patch-days: 7, semver-minor-days: 14, semver-major-days: 30 }

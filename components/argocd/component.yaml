@@ -5,3 +5,4 @@ chart:
   repo: https://argoproj.github.io/argo-helm
   name: argo-cd
   version: 10.14.0
+  digest: sha256:ba5b583c4e9b8e86b7bb8a619316319d3007330538a3f2c834068974372d4616

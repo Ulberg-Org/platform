@@ -4,3 +4,4 @@ chart:
   repo: https://grafana-community.github.io/helm-charts
   name: tempo
   version: 3.2.1
+  digest: sha256:3389c896bd3c8f2a54f054ac00eb1881c34eff2b8e53053e3ad42c9f394925c3
