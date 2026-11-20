@@ -63,6 +63,17 @@ build_renderer() {
   [ "$before" = "$after" ] || echo changed
 }
 
+# Loads the renderer image into the cluster's nodes, or says why not. Pulled from the release, it's multi-arch, of
+# which Docker only downloaded this machine's architecture; kind would export all of them, so it goes in as a
+# one-architecture archive. (The services' images are built here, for this architecture only.)
+load_renderer() { # image
+  local archive="$state/image.tar" out
+  docker save --platform "linux/$(docker version -f '{{.Server.Arch}}')" -o "$archive" "$1"
+  out=$(kind load image-archive "$archive" --name "$cluster" 2>&1) || { echo "$out" >&2; rm -f "$archive"; exit 1; }
+  rm -f "$archive"
+  echo "$out"
+}
+
 # Inside the CLI image the cluster isn't at localhost: the CLI's container joins kind's Docker network and talks
 # to the control plane and Grafana by name. From a checkout, nothing changes.
 join_kind() {
@@ -301,7 +312,7 @@ EOF
   k wait --for=condition=Ready nodes --all --timeout=5m >/dev/null
 
   step "Images: the renderer and each service's dev target (D61)"
-  kind load docker-image "$renderer_image" --name "$cluster" >/dev/null 2>&1
+  load_renderer "$renderer_image" >/dev/null
   service_images >/dev/null
 
   jq -r '.databases[] | "\(.name) \(.host)"' <<<"$plan" | while read -r db host; do
@@ -365,8 +376,8 @@ service_images() {
   while read -r name image build; do
     docker build -q --provenance=false --target dev -t "$image" "$app_repo/$build" >/dev/null
     # kind loads only onto nodes that don't have this exact image, and says so.
-    loaded=$(kind load docker-image "$image" --name "$cluster" 2>&1)
-    [[ $loaded == *"not yet present"* ]] && echo "$name"
+    loaded=$(kind load docker-image "$image" --name "$cluster" 2>&1) || { echo "$loaded" >&2; exit 1; }
+    if [[ $loaded == *"not yet present"* ]]; then echo "$name"; fi
   done < <(jq -r '.services[] | "\(.name) \(.image) \(.build)"' <<<"$plan")
 }
 
@@ -377,7 +388,7 @@ sync() {
   read_plan
   join_kind
   if [ "$renderer" = changed ]; then
-    kind load docker-image "$renderer_image" --name "$cluster" >/dev/null 2>&1
+    load_renderer "$renderer_image" >/dev/null
     k -n argocd rollout restart deployment/argocd-repo-server >/dev/null
     k -n argocd rollout status deployment/argocd-repo-server --timeout=5m >/dev/null
   fi
