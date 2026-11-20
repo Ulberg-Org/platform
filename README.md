@@ -27,7 +27,8 @@ platform and the app, with Postgres outside and Grafana for telemetry. It ships 
 (D63), so a developer needs only Docker and cosign:
 
 ```bash
-brew install cosign            # verifies the image's signature
+brew install cosign            # verifies the image's signature (with nix-darwin: add "cosign" to the
+                               # Homebrew brews in your flake, then darwin-rebuild switch)
 # Docker Desktop with 12 GiB of memory, sharing your home folder (the default)
 ```
 
