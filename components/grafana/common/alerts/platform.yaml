@@ -1,0 +1,199 @@
+# Grafana alert rules as code (D71), in Grafana's own provisioning format. They show in Grafana; locally nothing is
+# sent anywhere. Thresholds: errors above 5%, any restart or OOM kill, out of sync for 10 minutes, and dropped
+# connections (warning on any, critical above 20 in 5 minutes).
+apiVersion: 1
+groups:
+- orgId: 1
+  name: platform
+  folder: Platform
+  interval: 1m
+  rules:
+  - uid: errors
+    title: Errors above 5% of requests
+    condition: C
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: More than 5% of {{ $labels.service_name }}'s requests fail
+    noDataState: OK
+    execErrState: Error
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: sum by (service_name) (rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+          / sum by (service_name) (rate(http_server_request_duration_seconds_count[5m]))
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0.05
+  - uid: restarts
+    title: A pod restarted
+    condition: C
+    for: 0m
+    labels:
+      severity: warning
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.pod }} restarted"
+    noDataState: OK
+    execErrState: Error
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total[10m]))
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+  - uid: oom
+    title: A container ran out of memory
+    condition: C
+    for: 0m
+    labels:
+      severity: critical
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.pod }} was OOM-killed"
+    noDataState: OK
+    execErrState: Error
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: sum by (namespace, pod) (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"})
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+  - uid: out-of-sync
+    title: An Argo CD application is out of sync
+    condition: C
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "{{ $labels.name }} has been out of sync for 10 minutes"
+    noDataState: OK
+    execErrState: Error
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: count by (name) (argocd_app_info{sync_status!="Synced"})
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+  - uid: drops
+    title: Network drops involving an app
+    condition: C
+    for: 0m
+    labels:
+      severity: warning
+    annotations:
+      summary: Network rules dropped connections from {{ $labels.source }} to {{ $labels.destination
+        }}
+    noDataState: OK
+    execErrState: Error
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: sum by (source, destination) (increase(hubble_policy_verdicts_total{action="dropped"}[5m]))
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+  - uid: drops-many
+    title: Many network drops
+    condition: C
+    for: 0m
+    labels:
+      severity: critical
+    annotations:
+      summary: More than 20 connections from {{ $labels.source }} to {{ $labels.destination
+        }} dropped in 5 minutes
+    noDataState: OK
+    execErrState: Error
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: sum by (source, destination) (increase(hubble_policy_verdicts_total{action="dropped"}[5m]))
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 20

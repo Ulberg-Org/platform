@@ -1,0 +1,20 @@
+# Dashboards and alert rules as code (D71), kept in Grafana's own formats: dashboards as the JSON Grafana exports
+# (edit in Grafana, export, replace the file), alert rules as its provisioning YAML. This only packages them as
+# ConfigMaps, which Grafana's sidecar loads; Argo CD runs it. (Environments are still the renderer's job, D62.)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: dashboards
+    files:
+      - dashboards/services.json
+      - dashboards/pods.json
+      - dashboards/argocd.json
+      - dashboards/network.json
+      - dashboards/postgres.json
+    options: { labels: { grafana_dashboard: "1" } }
+  - name: alert-rules
+    files: [ alerts/platform.yaml ]
+    options: { labels: { grafana_alert: "1" } }
