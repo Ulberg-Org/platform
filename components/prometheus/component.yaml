@@ -1,0 +1,8 @@
+# Prometheus: metrics. The apps' arrive from the collector over OTLP; the resource metrics of every pod and node
+# (D64) it scrapes itself: the kubelets (CPU, memory), kube-state-metrics (desired vs actual state), the node
+# exporter, and pods that publish metrics (Envoy's per-route metrics).
+namespace: observability
+chart:
+  repo: https://prometheus-community.github.io/helm-charts
+  name: prometheus
+  version: 29.45.2

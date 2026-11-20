@@ -1,0 +1,6 @@
+# Loki: logs, received from the collector over OTLP. One instance with its own disk locally.
+namespace: observability
+chart:
+  repo: https://grafana-community.github.io/helm-charts
+  name: loki
+  version: 20.4.1

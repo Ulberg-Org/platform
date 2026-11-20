@@ -1,0 +1,30 @@
+# Locally the collector also reads Postgres's own log (D61): the platform CLI's database containers write it as
+# JSON to <app repo>/.local/postgres/<host>, which the workers see at /src/.local/postgres. In Azure the
+# Flexible Server's logs come from Azure (Phase 5).
+extraVolumes:
+  - name: postgres-logs
+    hostPath: { path: /src/.local/postgres, type: DirectoryOrCreate }
+extraVolumeMounts:
+  - { name: postgres-logs, mountPath: /var/log/postgresql, readOnly: true }
+config:
+  receivers:
+    filelog/postgres:
+      include: [ /var/log/postgresql/*/postgresql.json ]
+      start_at: beginning
+      operators:
+        - type: json_parser
+          timestamp: { parse_from: attributes.timestamp, layout: "%Y-%m-%d %H:%M:%S.%L %Z" }
+          severity: { parse_from: attributes.error_severity }
+        - type: move
+          from: attributes.message
+          to: body
+      resource:
+        service.name: postgres
+  processors:
+    resource:
+      attributes:
+        - { key: deployment.environment.name, value: local, action: upsert }
+  service:
+    pipelines:
+      logs:
+        receivers: [ otlp, filelog/postgres ]

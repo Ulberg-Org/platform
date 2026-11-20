@@ -1,0 +1,22 @@
+server:
+  fullnameOverride: prometheus-server
+  extraFlags:
+    - web.enable-otlp-receiver
+    - web.enable-remote-write-receiver
+  retention: 2d
+  persistentVolume: { enabled: false }
+  # OTLP resource attributes Prometheus keeps as labels, so app metrics can be filtered like traces and logs.
+  otlp:
+    promote_resource_attributes:
+      - service.name
+      - service.instance.id
+      - deployment.environment.name
+# The chart's config reloader (v0.95) has no arm64 build yet; v0.94.0 has. Back to the chart's own when it does.
+configmapReload:
+  prometheus:
+    image:
+      tag: v0.94.0@sha256:142a1f11df8dd165f00375b0b1826aecb9c9adeb05c39855893138d7c7575ff7
+alertmanager: { enabled: false }
+prometheus-pushgateway: { enabled: false }
+kube-state-metrics: { enabled: true }
+prometheus-node-exporter: { enabled: true }

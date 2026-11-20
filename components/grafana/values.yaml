@@ -1,0 +1,40 @@
+fullnameOverride: grafana
+persistence: { enabled: false }
+grafana.ini:
+  analytics: { reporting_enabled: false, check_for_updates: false, check_for_plugin_updates: false }
+  auth.anonymous: { enabled: false }
+# The three data sources, linked: from a trace to its logs and metrics, from a log line to its trace.
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        url: http://prometheus-server
+        isDefault: true
+      - name: Loki
+        uid: loki
+        type: loki
+        url: http://loki:3100
+        jsonData:
+          derivedFields:
+            - name: trace
+              datasourceUid: tempo
+              matcherType: label
+              matcherRegex: trace_id
+              url: "$${__value.raw}"
+      - name: Tempo
+        uid: tempo
+        type: tempo
+        url: http://tempo:3200
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: loki
+            filterByTraceID: true
+            spanStartTimeShift: -5m
+            spanEndTimeShift: 5m
+          tracesToMetrics: { datasourceUid: prometheus }
+          serviceMap: { datasourceUid: prometheus }
+          nodeGraph: { enabled: true }
+testFramework: { enabled: false }

@@ -1,0 +1,7 @@
+# The OpenTelemetry Collector (D64): every app sends its traces, logs and metrics here (OTLP,
+# collector.observability:4317), and it forwards them to Tempo, Loki and Prometheus.
+namespace: observability
+chart:
+  repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+  name: opentelemetry-collector
+  version: 0.178.3

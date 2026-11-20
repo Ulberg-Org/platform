@@ -1,0 +1,6 @@
+# Grafana: where people and agents read the telemetry (traces, logs, metrics), each as themselves.
+namespace: observability
+chart:
+  repo: https://grafana-community.github.io/helm-charts
+  name: grafana
+  version: 14.4.1

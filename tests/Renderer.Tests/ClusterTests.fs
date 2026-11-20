@@ -42,6 +42,20 @@ let tests =
     testList
         "cluster"
         [
+            test "the local platform runs the telemetry stack (D64), each component present and valid" {
+                let repo = AppContext.BaseDirectory
+                let environment = environmentYaml "local" |> Environment.parse |> ok
+                let names = environment.components |> List.map App.Name.value
+
+                for c in [ "observability"; "collector"; "loki"; "tempo"; "prometheus"; "grafana" ] do
+                    Expect.contains names c $"local runs {c}"
+
+                for c in names do
+                    let file = Path.Combine(repo, "components", c, "component.yaml")
+                    Expect.isTrue (File.Exists file) $"components/{c}/component.yaml"
+                    Expect.isOk (Cluster.parseComponent c [] [] (File.ReadAllText file)) $"components/{c} parses"
+            }
+
             test "an app may only deploy ordinary kinds, into its own namespace, from its own repo" {
                 let project = (rendered "local" (todo "{}") |> ok)["todo-project.yaml"]
                 Expect.stringContains project "- git://git.gitops.svc.cluster.local/todo" "its repo"

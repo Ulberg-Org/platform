@@ -1,0 +1,8 @@
+# Locally: http://localhost:9876 (kind maps the node port). The developer signs in as admin with a local-only
+# password; Claude reads through its own Viewer service account, created by the platform CLI. Azure signs in
+# with Entra (Phase 5).
+service:
+  type: NodePort
+  nodePort: 30876
+adminUser: admin
+adminPassword: local-only-admin
