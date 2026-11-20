@@ -3,7 +3,8 @@
 #
 #   platform up   <app repo>   a fresh cluster with the platform, the app's database, and the app
 #   platform sync <app repo>   hands Argo CD the checkouts as they are now (platform.yaml, environments,
-#                              components, the renderer) and waits until everything has rolled out
+#                              components, the renderer), rebuilds the services' dev images if their packages
+#                              changed, and waits until everything has rolled out
 #   platform test <app repo>   checks the network rules against the running cluster (D66)
 #   platform down <app repo>   removes the cluster and the database
 #
@@ -16,6 +17,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 platform_root=$(cd "$here/.." && pwd)
 # shellcheck source=versions.env
 source "$here/versions.env"
+# Inside the CLI image (D63), the release names the renderer image to run (RENDERER_IMAGE, PLATFORM_VERSION);
+# from a checkout of the platform repo, the renderer is built from it.
+[ -f "$here/release.env" ] && source "$here/release.env"
 
 usage="usage: platform up|sync|test|down <app repo>"
 command=${1:?$usage}
@@ -23,45 +27,87 @@ app_repo=$(cd "${2:?$usage}" && pwd)
 [ -f "$app_repo/platform.yaml" ] || { echo "No platform.yaml in $app_repo" >&2; exit 1; }
 
 state="$app_repo/.local"
-kubeconfig="$state/kubeconfig"
+wait=2m # how long sync waits for everything to be ready; up waits longer
+kubeconfig="$state/kubeconfig" # the developer's: the cluster at localhost
+cli_kubeconfig=$kubeconfig     # the CLI's own; inside the image, the cluster by name (join_kind)
+grafana=http://localhost:9876
 renderer_image=platform/renderer:dev
-k() { kubectl --kubeconfig "$kubeconfig" "$@"; }
-h() { helm --kubeconfig "$kubeconfig" "$@"; }
+platform_snapshot="$state/gitops/platform"
+k() { kubectl --kubeconfig "$cli_kubeconfig" "$@"; }
+h() { helm --kubeconfig "$cli_kubeconfig" "$@"; }
 step() { printf '\n== %s\n' "$*"; }
 
-# The renderer, from its image (the same one Argo CD's plugin runs), with both repos mounted read-only.
+# The renderer, from its image (the same one Argo CD's plugin runs), reading the platform's snapshot and the app
+# repo read-only. Both are paths on the host, which the host's Docker can mount wherever the CLI runs.
 render() {
-  docker run --rm -v "$platform_root:/platform:ro" -v "$app_repo:/app-repo:ro" "$renderer_image" "$@"
+  docker run --rm -v "$platform_snapshot:/platform:ro" -v "$app_repo:/app-repo:ro" "$renderer_image" "$@"
 }
 
-# Builds the renderer image from the platform checkout; prints "changed" if it differs from the last build
-# (without provenance, which is stamped anew on every build, the image ID only changes with its content).
+sha256() { (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | cut -d' ' -f1; }
+
+# The renderer image: inside the CLI image the release's, verified (D63); from a checkout, built from it.
+# Prints "changed" if it differs from before (built without provenance, which is stamped anew on every build,
+# so the image ID only changes with its content).
 build_renderer() {
   local before after
   before=$(docker image inspect -f '{{.Id}}' "$renderer_image" 2>/dev/null || true)
-  docker build -q --provenance=false -f "$platform_root/renderer/Dockerfile" -t "$renderer_image" "$platform_root" >/dev/null
+  if [ -n "${RENDERER_IMAGE:-}" ]; then
+    cosign verify "$RENDERER_IMAGE" --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      --certificate-identity-regexp '^https://github\.com/Ulberg-Org/platform/\.github/workflows/release\.yml@refs/tags/v' \
+      >/dev/null 2>&1 || { echo "The renderer image $RENDERER_IMAGE isn't signed by the platform's release" >&2; exit 1; }
+    docker pull -q "$RENDERER_IMAGE" >/dev/null && docker tag "$RENDERER_IMAGE" "$renderer_image"
+  else
+    docker build -q --provenance=false -f "$platform_root/renderer/Dockerfile" -t "$renderer_image" "$platform_root" >/dev/null
+  fi
   after=$(docker image inspect -f '{{.Id}}' "$renderer_image")
   [ "$before" = "$after" ] || echo changed
 }
 
+# Inside the CLI image the cluster isn't at localhost: the CLI's container joins kind's Docker network and talks
+# to the control plane and Grafana by name. From a checkout, nothing changes.
+join_kind() {
+  [ -f /.dockerenv ] || return 0
+  docker network connect kind "$(hostname)" 2>/dev/null || true
+  cli_kubeconfig="$state/kubeconfig-cli"
+  kind get kubeconfig --internal --name "$cluster" >"$cli_kubeconfig"
+  grafana="http://$cluster-control-plane:30876"
+}
+
 # What to build and create for the app (Render.plan), so the CLI never parses platform.yaml itself.
 read_plan() {
+  mkdir -p "$state"
+  platform_commit=$(snapshot "$platform_root" platform)
   plan=$(render plan /app-repo/platform.yaml /platform/environments/local.yaml)
   app=$(jq -r .app <<<"$plan")
   cluster=$app
 }
 
-# Commits a snapshot of a checkout, uncommitted and new files included, to $state/gitops/<name>, which the git
-# server serves to Argo CD (D68). Prints the commit.
-snapshot() { # checkout name
+# A source's files (NUL-separated) and where they come from: a checkout's tracked and new files, uncommitted
+# changes included, or everything in the CLI image's copy of the platform.
+files_of() {
+  if git -C "$1" rev-parse 2>/dev/null; then
+    git -C "$1" ls-files -z -co --exclude-standard | while IFS= read -r -d '' f; do [ -e "$1/$f" ] && printf '%s\0' "$f"; done
+  else
+    (cd "$1" && find . -type f ! -name release.env -print0)
+  fi
+}
+origin_of() {
+  if git -C "$1" rev-parse 2>/dev/null; then
+    echo "$(git -C "$1" rev-parse --short HEAD)$(git -C "$1" diff --quiet HEAD -- || echo "-dirty")"
+  else
+    echo "release ${PLATFORM_VERSION:-unknown}"
+  fi
+}
+
+# Commits a snapshot of a source (see files_of) to $state/gitops/<name>, which the git server serves to Argo CD
+# (D68). Prints the commit.
+snapshot() { # source name
   local source=$1 repo="$state/gitops/$2" from
-  from=$(git -C "$source" rev-parse --short HEAD)$(git -C "$source" diff --quiet HEAD -- || echo "-dirty")
+  from=$(origin_of "$source")
   mkdir -p "$repo"
   [ -d "$repo/.git" ] || git -C "$repo" init -q -b main
   find "$repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-  (cd "$source" && git ls-files -z -co --exclude-standard | while IFS= read -r -d '' f; do
-    [ -e "$f" ] && printf '%s\0' "$f"
-  done | xargs -0 tar cf -) | tar xf - -C "$repo"
+  (cd "$source" && files_of "$source" | xargs -0 tar cf -) | tar xf - -C "$repo"
   git -C "$repo" add -A
   git -C "$repo" diff --cached --quiet ||
     git -C "$repo" -c user.name=platform -c user.email=platform@localhost -c commit.gpgsign=false \
@@ -71,24 +117,46 @@ snapshot() { # checkout name
 
 # Waits until Argo CD has compared both snapshots and everything is in sync and healthy, then until the app's
 # services have rolled out (Argo CD's health can still read Healthy from before a change). Argo CD only runs a
-# sync when something differs, so the compared revision is what tells that it has seen a snapshot.
+# sync when something differs, so the compared revision is what tells that it has seen a snapshot. Gives up
+# after $wait (2 minutes for sync; longer for up, which pulls and compiles everything) and says why.
 synced() { # platform commit, app commit
   k -n argocd annotate applications --all argocd.argoproj.io/refresh=normal --overwrite >/dev/null
-  k -n argocd wait application/platform --for=jsonpath="{.status.sync.revision}=$1" --timeout=5m >/dev/null
-  until k -n argocd get "application/$app" >/dev/null 2>&1; do sleep 2; done
-  k -n argocd wait "application/$app" --for=jsonpath="{.status.sync.revision}=$2" --timeout=5m >/dev/null
-  k -n argocd wait applications --all --for=jsonpath='{.status.sync.status}=Synced' --timeout=10m >/dev/null
-  k -n argocd wait applications --all --for=jsonpath='{.status.health.status}=Healthy' --timeout=10m >/dev/null
-  for name in $(jq -r '.services[].name' <<<"$plan"); do
-    k -n "$app" rollout status "deployment/$name" --timeout=10m >/dev/null
-  done
+  ready "$1" "$2" >/dev/null 2>&1 || { not_ready; exit 1; }
   k -n argocd get applications --no-headers | awk '{print "Argo CD: " $1 " " $2 ", " $3}'
+}
+
+ready() { # platform commit, app commit
+  k -n argocd wait application/platform --for=jsonpath="{.status.sync.revision}=$1" --timeout="$wait" &&
+    k -n argocd wait "application/$app" --for=create --timeout="$wait" &&
+    k -n argocd wait "application/$app" --for=jsonpath="{.status.sync.revision}=$2" --timeout="$wait" &&
+    k -n argocd wait applications --all --for=jsonpath='{.status.sync.status}=Synced' --timeout="$wait" &&
+    k -n argocd wait applications --all --for=jsonpath='{.status.health.status}=Healthy' --timeout="$wait" &&
+    rolled_out
+}
+
+rolled_out() {
+  local name
+  for name in $(jq -r '.services[].name' <<<"$plan"); do
+    k -n "$app" rollout status "deployment/$name" --timeout="$wait" || return 1
+  done
+}
+
+# Why something isn't ready: the Argo CD applications that aren't synced and healthy, and the last lines of
+# every pod of the app that isn't ready.
+not_ready() {
+  local pod
+  echo "Not ready after $wait:" >&2
+  k -n argocd get applications --no-headers | awk '$2 != "Synced" || $3 != "Healthy" {print "  Argo CD: " $1 " " $2 ", " $3}' >&2
+  for pod in $(k -n "$app" get pods --no-headers | awk '{split($2, r, "/"); if (r[1] != r[2]) print $1}'); do
+    echo "  $pod, last lines:" >&2
+    k -n "$app" logs "$pod" --tail=8 2>&1 | sed 's/^/    /' >&2
+  done
 }
 
 # Claude's own Grafana account (D41 locally): a Viewer service account with a token in $state, which the app
 # repo's .mcp.json hands to mcp-grafana. People sign in as admin; Claude only reads, and Grafana tells them apart.
 grafana_for_claude() {
-  local api=http://localhost:9876/api auth=admin:local-only-admin token="$state/grafana-claude-token" id
+  local api=$grafana/api auth=admin:local-only-admin token="$state/grafana-claude-token" id
   until curl -sf -u "$auth" "$api/health" >/dev/null; do sleep 2; done
   [ -f "$token" ] && curl -sf -H "Authorization: Bearer $(cat "$token")" "$api/user" >/dev/null && return
   id=$(curl -sf -u "$auth" "$api/serviceaccounts/search?query=claude" | jq -r '.serviceAccounts[] | select(.name=="claude") | .id')
@@ -194,6 +262,7 @@ SQL
 }
 
 up() {
+  wait=10m
   mkdir -p "$state"
   step "Renderer image (Argo CD's plugin) and the app's plan"
   build_renderer >/dev/null
@@ -222,6 +291,7 @@ nodes:
     extraMounts: [ { hostPath: "$app_repo", containerPath: /src, readOnly: true } ]
 EOF
   kind create cluster --name "$cluster" --config "$state/kind.yaml" --kubeconfig "$kubeconfig" --wait 0s
+  join_kind
 
   step "Cilium $CILIUM_CHART_VERSION (the network; AKS brings its own)"
   h repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
@@ -232,11 +302,7 @@ EOF
 
   step "Images: the renderer and each service's dev target (D61)"
   kind load docker-image "$renderer_image" --name "$cluster" >/dev/null 2>&1
-  jq -r '.services[] | "\(.image) \(.build)"' <<<"$plan" | while read -r image build; do
-    docker build -q --target dev -t "$image" "$app_repo/$build" >/dev/null
-    kind load docker-image "$image" --name "$cluster" >/dev/null 2>&1
-    echo "$image"
-  done
+  service_images >/dev/null
 
   jq -r '.databases[] | "\(.name) \(.host)"' <<<"$plan" | while read -r db host; do
     step "Database $db at $host (Postgres outside the cluster)"
@@ -244,7 +310,6 @@ EOF
   done
 
   step "Snapshots of the checkouts, served by the git server (D68)"
-  platform_commit=$(snapshot "$platform_root" platform)
   app_commit=$(snapshot "$app_repo" "$app")
   k create namespace gitops >/dev/null
   k apply -f "$platform_root/components/gitops/local" >/dev/null
@@ -255,7 +320,7 @@ EOF
   read -r repo chart version namespace digest <<<"$(render chart /platform argocd)"
   rm -rf "$state/charts" && mkdir -p "$state/charts"
   h pull "$chart" --repo "$repo" --version "$version" -d "$state/charts" >/dev/null
-  [ "sha256:$(shasum -a 256 "$state"/charts/*.tgz | cut -d' ' -f1)" = "$digest" ] ||
+  [ "sha256:$(sha256 "$state"/charts/*.tgz)" = "$digest" ] ||
     { echo "Argo CD's chart $chart $version isn't the package components/argocd pins ($digest)" >&2; exit 1; }
   h install argocd "$state"/charts/*.tgz -n "$namespace" --create-namespace \
     -f "$platform_root/components/argocd/values.yaml" -f "$platform_root/components/argocd/values-local.yaml" \
@@ -292,24 +357,39 @@ EOF
   echo "kubectl: kubectl --kubeconfig $kubeconfig"
 }
 
+# Builds each service's dev target and loads it into the cluster (the package list or the SDK may have
+# changed); prints the services whose image the cluster didn't have yet. Code changes don't need this: they reach
+# the pods by hot reload.
+service_images() {
+  local name image build loaded
+  while read -r name image build; do
+    docker build -q --provenance=false --target dev -t "$image" "$app_repo/$build" >/dev/null
+    # kind loads only onto nodes that don't have this exact image, and says so.
+    loaded=$(kind load docker-image "$image" --name "$cluster" 2>&1)
+    [[ $loaded == *"not yet present"* ]] && echo "$name"
+  done < <(jq -r '.services[] | "\(.name) \(.image) \(.build)"' <<<"$plan")
+}
+
 sync() {
   # The renderer first: the plan comes from it, and a changed platform.yaml may need the new one.
   local renderer
   renderer=$(build_renderer)
   read_plan
+  join_kind
   if [ "$renderer" = changed ]; then
     kind load docker-image "$renderer_image" --name "$cluster" >/dev/null 2>&1
     k -n argocd rollout restart deployment/argocd-repo-server >/dev/null
     k -n argocd rollout status deployment/argocd-repo-server --timeout=5m >/dev/null
   fi
-  synced "$(snapshot "$platform_root" platform)" "$(snapshot "$app_repo" "$app")"
+  for name in $(service_images); do k -n "$app" rollout restart "deployment/$name" >/dev/null; done
+  synced "$platform_commit" "$(snapshot "$app_repo" "$app")"
   grafana_for_claude
 }
 
 case "$command" in
   up) up ;;
   sync) sync ;;
-  test) build_renderer >/dev/null && read_plan && network_test ;;
+  test) build_renderer >/dev/null && read_plan && join_kind && network_test ;;
   down) build_renderer >/dev/null && read_plan && down ;;
   *) echo "$usage" >&2; exit 2 ;;
 esac

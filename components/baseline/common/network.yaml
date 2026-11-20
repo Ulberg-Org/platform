@@ -1,8 +1,9 @@
 # Every pod is deny-by-default (AGENTS.md §2), including in namespaces nobody wrote rules for (`default`, or one
-# made by hand): it may only look up names. Each namespace's own rules add what its pods need; Cilium adds rules
-# up, so this takes nothing away from them. Not selected: the cluster's own components (kube-system,
-# local-path-storage locally), and Argo CD, which applies the other rules and must never cut itself off (it has
-# its own rule, components/argocd/common/network.yaml).
+# made by hand): it may only look up names. Not selected: the cluster's own components (kube-system,
+# local-path-storage locally), and the platform's namespaces, which have their own rule with both directions
+# (components/<name>): applied with their charts, so a chart's setup job (a hook, which runs first) isn't cut off
+# from the Kubernetes API before that rule exists. App namespaces get their deny-all from the root application,
+# before the app (Cluster.fs).
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
@@ -12,7 +13,7 @@ spec:
     matchExpressions:
       - key: k8s:io.kubernetes.pod.namespace
         operator: NotIn
-        values: [ kube-system, local-path-storage, argocd ]
+        values: [ kube-system, local-path-storage, argocd, gateway, gitops, observability ]
   ingress: [ {} ]
   egress:
     - toEndpoints:
