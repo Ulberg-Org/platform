@@ -84,6 +84,20 @@ synced() { # platform commit, app commit
   k -n argocd get applications --no-headers | awk '{print "Argo CD: " $1 " " $2 ", " $3}'
 }
 
+# Claude's own Grafana account (D41 locally): a Viewer service account with a token in $state, which the app
+# repo's .mcp.json hands to mcp-grafana. People sign in as admin; Claude only reads, and Grafana tells them apart.
+grafana_for_claude() {
+  local api=http://localhost:9876/api auth=admin:local-only-admin token="$state/grafana-claude-token" id
+  until curl -sf -u "$auth" "$api/health" >/dev/null; do sleep 2; done
+  [ -f "$token" ] && curl -sf -H "Authorization: Bearer $(cat "$token")" "$api/user" >/dev/null && return
+  id=$(curl -sf -u "$auth" "$api/serviceaccounts/search?query=claude" | jq -r '.serviceAccounts[] | select(.name=="claude") | .id')
+  [ -n "$id" ] || id=$(curl -sf -u "$auth" -H 'Content-Type: application/json' "$api/serviceaccounts" \
+    -d '{"name":"claude","role":"Viewer"}' | jq -r .id)
+  curl -sf -u "$auth" -H 'Content-Type: application/json' "$api/serviceaccounts/$id/tokens" \
+    -d "{\"name\":\"mcp-$(date +%s)\"}" | jq -r .key >"$token"
+  chmod 600 "$token"
+}
+
 down() {
   kind delete cluster --name "$cluster" 2>/dev/null || true
   docker ps -aq --filter "label=platform.app=$app" | xargs -r docker rm -f >/dev/null
@@ -91,10 +105,16 @@ down() {
 
 # Postgres outside the cluster (D61), on kind's Docker network, as Azure's Flexible Server is outside AKS. The
 # platform creates the database and its roles (§9.2): local passwords here, Entra identities in Azure (D69).
+# Its own log (connections, errors, slow statements) goes as JSON to $state/postgres/<host>, which the workers
+# see at /src/.local/postgres and the collector reads.
 database() { # name host
-  local db=$1 host=$2
+  local db=$1 host=$2 logs="$state/postgres/$2"
+  rm -rf "$logs" && mkdir -p "$logs" && chmod 777 "$logs"
   docker run -d --name "$host" --label "platform.app=$app" --network kind -e POSTGRES_DB="$db" \
-    -e POSTGRES_PASSWORD=local-only-superuser "$POSTGRES_IMAGE" >/dev/null
+    -e POSTGRES_PASSWORD=local-only-superuser -v "$logs:/var/log/postgresql" "$POSTGRES_IMAGE" \
+    postgres -c logging_collector=on -c log_destination=jsonlog -c log_directory=/var/log/postgresql \
+    -c log_filename=postgresql.log -c log_rotation_age=0 -c log_connections=on -c log_disconnections=on \
+    -c log_min_duration_statement=200 -c log_file_mode=0644 >/dev/null
   until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
   sleep 2 # pg_isready answers before the init process has restarted the server
   until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
@@ -134,6 +154,7 @@ nodes:
     image: $KIND_NODE_IMAGE
     extraPortMappings:
       - { containerPort: 30875, hostPort: 9875, listenAddress: 127.0.0.1 } # the app, through the gateway
+      - { containerPort: 30876, hostPort: 9876, listenAddress: 127.0.0.1 } # Grafana
   # Two workers, so an app's two instances sit on different nodes (D57); the app's repo is mounted on both
   # for hot reload (D61) and for the git server's snapshots (D68).
   - role: worker
@@ -201,19 +222,26 @@ spec:
     automated: { prune: true, selfHeal: true }
 EOF
   synced "$platform_commit" "$app_commit"
+  grafana_for_claude
 
   step "Ready"
-  echo "App: http://localhost:9875   kubectl: kubectl --kubeconfig $kubeconfig"
+  echo "App:     http://localhost:9875"
+  echo "Grafana: http://localhost:9876 (admin / local-only-admin; Claude reads as the service account 'claude')"
+  echo "kubectl: kubectl --kubeconfig $kubeconfig"
 }
 
 sync() {
+  # The renderer first: the plan comes from it, and a changed platform.yaml may need the new one.
+  local renderer
+  renderer=$(build_renderer)
   read_plan
-  if [ "$(build_renderer)" = changed ]; then
+  if [ "$renderer" = changed ]; then
     kind load docker-image "$renderer_image" --name "$cluster" >/dev/null 2>&1
     k -n argocd rollout restart deployment/argocd-repo-server >/dev/null
     k -n argocd rollout status deployment/argocd-repo-server --timeout=5m >/dev/null
   fi
   synced "$(snapshot "$platform_root" platform)" "$(snapshot "$app_repo" "$app")"
+  grafana_for_claude
 }
 
 case "$command" in

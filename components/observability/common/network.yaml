@@ -1,0 +1,25 @@
+# The telemetry stack's network (deny by default, AGENTS.md §2; one rule with both directions, see
+# components/argocd/common/network.yaml).
+# In: telemetry from anywhere in the cluster to the collector (OTLP); Grafana from outside (http://localhost:9876
+#     locally); everything else only from inside the namespace.
+# Out: inside the namespace, DNS, the Kubernetes API (discovery, kube-state-metrics, the kubelets through it) and
+#     scraping metrics inside the cluster (nodes and pods that allow it, e.g. Envoy's per-route metrics).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: observability
+  namespace: observability
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEndpoints: [ {} ]
+    - fromEntities: [ cluster ]
+      toPorts: [ { ports: [ { port: "4317", protocol: TCP }, { port: "4318", protocol: TCP } ] } ]
+    - fromEntities: [ world, cluster ]
+      toPorts: [ { ports: [ { port: "3000", protocol: TCP } ] } ]
+  egress:
+    - toEndpoints: [ {} ]
+    - toEntities: [ kube-apiserver, cluster ]
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, k8s-app: kube-dns }
+      toPorts: [ { ports: [ { port: "53", protocol: ANY } ] } ]

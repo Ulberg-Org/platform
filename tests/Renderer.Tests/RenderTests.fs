@@ -16,7 +16,7 @@ services:
     port: 8080
     replicas: { min: 2, max: 4 }
     resources: { cpu: 250m, memory: 256Mi }
-    health: { live: /health/live, ready: /health/ready }
+    health: { port: 8081, live: /health/live, ready: /health/ready }
     routes: [ /, /api ]
     database: todo
   - name: worker
@@ -25,7 +25,7 @@ services:
     port: 8080
     replicas: { min: 2, max: 2 }
     resources: { cpu: 100m, memory: 128Mi }
-    health: { live: /live, ready: /ready }
+    health: { port: 9090, live: /live, ready: /ready }
 databases:
   todo: { engine: postgres }
 """
@@ -91,6 +91,19 @@ let tests =
                 Expect.stringContains dev["backend-network.yaml"] "- 10.20.2.0/24" "the database subnet"
                 Expect.isFalse (dev["backend-network.yaml"].Contains "toFQDNs") "no names (paid add-on in AKS)"
                 Expect.isFalse (dev["backend-network.yaml"].Contains "matchPattern") "no DNS inspection"
+            }
+
+            test "health is on its own port, which only the probes use: no Service port, no route (D73)" {
+                let local = rendered "local"
+                Expect.stringContains local["backend-deployment.yaml"] "port: 8081" "probes on the health port"
+                Expect.isFalse (local["backend-service.yaml"].Contains "8081") "the Service doesn't expose it"
+                Expect.isFalse (local["backend-network.yaml"].Contains "8081") "no rule lets anyone in on it"
+            }
+
+            test "the health port must differ from the API port" {
+                match App.parse (app.Replace("port: 8081, live", "port: 8080, live")) with
+                | Ok _ -> failtest "expected an error"
+                | Error errors -> Expect.stringContains (String.concat "\n" errors) "'health.port'" "health.port"
             }
 
             test "routes go through the gateway; a service without routes gets none" {

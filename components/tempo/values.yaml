@@ -1,0 +1,11 @@
+fullnameOverride: tempo
+tempo:
+  receivers:
+    otlp:
+      protocols:
+        grpc: { endpoint: 0.0.0.0:4317 }
+  # Span metrics and the service graph, so Grafana can show request rates and errors per service from traces.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: http://prometheus-server/api/v1/write
+persistence: { enabled: false }

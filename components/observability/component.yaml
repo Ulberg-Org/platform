@@ -1,0 +1,3 @@
+# The telemetry stack's namespace and network rule (D64). The stack itself: collector, loki, tempo, prometheus,
+# grafana (one component each).
+namespace: observability
