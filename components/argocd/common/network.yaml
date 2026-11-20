@@ -1,0 +1,24 @@
+# Argo CD's network (deny by default, AGENTS.md §2): its parts talk to each other, to the Kubernetes API, to DNS,
+# to the git server (locally) and to HTTPS outside the cluster (GitHub, chart repositories). Nothing comes in
+# from outside its namespace. One Cilium rule with both directions denies everything else: no separate deny-all,
+# which Argo CD could apply before this rule and so cut itself off.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEndpoints: [ {} ]
+  egress:
+    - toEndpoints: [ {} ]
+    - toEntities: [ kube-apiserver ]
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, k8s-app: kube-dns }
+      toPorts: [ { ports: [ { port: "53", protocol: ANY } ] } ]
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": gitops }
+      toPorts: [ { ports: [ { port: "9418", protocol: TCP } ] } ]
+    - toEntities: [ world ]
+      toPorts: [ { ports: [ { port: "443", protocol: TCP } ] } ]

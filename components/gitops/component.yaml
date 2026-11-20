@@ -1,0 +1,2 @@
+# The local git server (D68): serves snapshots of the checkouts to Argo CD. Local only; Azure reads GitHub.
+namespace: gitops

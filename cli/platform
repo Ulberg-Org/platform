@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# The platform CLI (D63): sets up the local platform (D61) and deploys an app into it, rendered from the app's
-# platform.yaml with environments/local.yaml (D60, D62).
+# The platform CLI (D63): sets up the local platform (D61) and runs an app in it.
 #
 #   platform up   <app repo>   a fresh cluster with the platform, the app's database, and the app
-#   platform sync <app repo>   renders the app again (after a platform.yaml change) and waits for Argo CD
+#   platform sync <app repo>   hands Argo CD the checkouts as they are now (platform.yaml, environments,
+#                              components, the renderer) and waits until everything has rolled out
 #   platform down <app repo>   removes the cluster and the database
 #
-# kind, Cilium, Envoy Gateway, Argo CD, Postgres outside the cluster, the app with hot reload. The telemetry
-# stack follows (PLAN Phase 2).
+# It only bootstraps (D67): kind, Cilium, the git server, Argo CD and its root application. Argo CD then deploys
+# everything else from the platform repo, exactly as in Azure: the platform components and the app, rendered by
+# the renderer running inside Argo CD (D68). Code changes reach the app's pods by hot reload, without Argo CD.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -18,62 +19,69 @@ source "$here/versions.env"
 usage="usage: platform up|sync|down <app repo>"
 command=${1:?$usage}
 app_repo=$(cd "${2:?$usage}" && pwd)
-app_yaml="$app_repo/platform.yaml"
-[ -f "$app_yaml" ] || { echo "No platform.yaml in $app_repo" >&2; exit 1; }
+[ -f "$app_repo/platform.yaml" ] || { echo "No platform.yaml in $app_repo" >&2; exit 1; }
 
 state="$app_repo/.local"
-rendered="$state/rendered"
 kubeconfig="$state/kubeconfig"
+renderer_image=platform/renderer:dev
 k() { kubectl --kubeconfig "$kubeconfig" "$@"; }
 h() { helm --kubeconfig "$kubeconfig" "$@"; }
 step() { printf '\n== %s\n' "$*"; }
 
-# How the renderer runs: the published binary in the CLI image, or from source while developing the platform.
+# The renderer, from its image (the same one Argo CD's plugin runs), with both repos mounted read-only.
 render() {
-  if command -v platform-render >/dev/null; then
-    platform-render "$@"
-  else
-    dotnet run --project "$platform_root/renderer/Platform.Renderer" -c Release -- "$@"
-  fi
+  docker run --rm -v "$platform_root:/platform:ro" -v "$app_repo:/app-repo:ro" "$renderer_image" "$@"
 }
 
-# Renders the app for the local environment into $rendered, with plan.json listing what the CLI must build and
-# create (Render.plan), so the CLI never parses platform.yaml itself.
-render_local() {
-  rm -rf "$rendered"
-  render "$app_yaml" "$platform_root/environments/local.yaml" dev "$rendered" >/dev/null
-  app=$(jq -r .app "$rendered/plan.json")
+# Builds the renderer image from the platform checkout; prints "changed" if it differs from the last build
+# (without provenance, which is stamped anew on every build, the image ID only changes with its content).
+build_renderer() {
+  local before after
+  before=$(docker image inspect -f '{{.Id}}' "$renderer_image" 2>/dev/null || true)
+  docker build -q --provenance=false -f "$platform_root/renderer/Dockerfile" -t "$renderer_image" "$platform_root" >/dev/null
+  after=$(docker image inspect -f '{{.Id}}' "$renderer_image")
+  [ "$before" = "$after" ] || echo changed
+}
+
+# What to build and create for the app (Render.plan), so the CLI never parses platform.yaml itself.
+read_plan() {
+  plan=$(render plan /app-repo/platform.yaml /platform/environments/local.yaml)
+  app=$(jq -r .app <<<"$plan")
   cluster=$app
 }
 
-# Argo CD deploys what's in git, as in Azure (D61): the rendered manifests are committed to the app's repo in
-# $state/gitops, which the git server in the cluster serves. Each commit names the app commit it was rendered
-# from.
-publish() {
-  local repo="$state/gitops/$app" source
-  source=$(git -C "$app_repo" rev-parse --short HEAD)$(git -C "$app_repo" diff --quiet HEAD -- || echo "-dirty")
+# Commits a snapshot of a checkout, uncommitted and new files included, to $state/gitops/<name>, which the git
+# server serves to Argo CD (D68). Prints the commit.
+snapshot() { # checkout name
+  local source=$1 repo="$state/gitops/$2" from
+  from=$(git -C "$source" rev-parse --short HEAD)$(git -C "$source" diff --quiet HEAD -- || echo "-dirty")
   mkdir -p "$repo"
   [ -d "$repo/.git" ] || git -C "$repo" init -q -b main
   find "$repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-  cp "$rendered"/manifests/* "$repo"/
+  (cd "$source" && git ls-files -z -co --exclude-standard | while IFS= read -r -d '' f; do
+    [ -e "$f" ] && printf '%s\0' "$f"
+  done | xargs -0 tar cf -) | tar xf - -C "$repo"
   git -C "$repo" add -A
   git -C "$repo" diff --cached --quiet ||
     git -C "$repo" -c user.name=platform -c user.email=platform@localhost -c commit.gpgsign=false \
-      commit -q -m "Rendered from $source"
-  revision=$(git -C "$repo" rev-parse HEAD)
+      commit -q -m "Snapshot of $2 at $from"
+  git -C "$repo" rev-parse HEAD
 }
 
-# Waits until Argo CD has applied the latest commit and every service has rolled out. (Argo CD's own health can
-# still read Healthy from before the change, so the rollouts are checked directly.)
-synced() {
-  k -n argocd annotate "application/$app" argocd.argoproj.io/refresh=normal --overwrite >/dev/null
-  k -n argocd wait "application/$app" --timeout=5m \
-    --for=jsonpath="{.status.operationState.syncResult.revision}=$revision" >/dev/null
-  k -n argocd wait "application/$app" --for=jsonpath='{.status.operationState.phase}=Succeeded' --timeout=5m >/dev/null
-  for name in $(jq -r '.services[].name' "$rendered/plan.json"); do
+# Waits until Argo CD has compared both snapshots and everything is in sync and healthy, then until the app's
+# services have rolled out (Argo CD's health can still read Healthy from before a change). Argo CD only runs a
+# sync when something differs, so the compared revision is what tells that it has seen a snapshot.
+synced() { # platform commit, app commit
+  k -n argocd annotate applications --all argocd.argoproj.io/refresh=normal --overwrite >/dev/null
+  k -n argocd wait application/platform --for=jsonpath="{.status.sync.revision}=$1" --timeout=5m >/dev/null
+  until k -n argocd get "application/$app" >/dev/null 2>&1; do sleep 2; done
+  k -n argocd wait "application/$app" --for=jsonpath="{.status.sync.revision}=$2" --timeout=5m >/dev/null
+  k -n argocd wait applications --all --for=jsonpath='{.status.sync.status}=Synced' --timeout=10m >/dev/null
+  k -n argocd wait applications --all --for=jsonpath='{.status.health.status}=Healthy' --timeout=10m >/dev/null
+  for name in $(jq -r '.services[].name' <<<"$plan"); do
     k -n "$app" rollout status "deployment/$name" --timeout=10m >/dev/null
   done
-  echo "Argo CD: $app synced at ${revision:0:7}, every service rolled out"
+  k -n argocd get applications --no-headers | awk '{print "Argo CD: " $1 " " $2 ", " $3}'
 }
 
 down() {
@@ -82,7 +90,7 @@ down() {
 }
 
 # Postgres outside the cluster (D61), on kind's Docker network, as Azure's Flexible Server is outside AKS. The
-# platform creates the database and its roles (§9.2): local passwords here, Entra identities in Azure.
+# platform creates the database and its roles (§9.2): local passwords here, Entra identities in Azure (D69).
 database() { # name host
   local db=$1 host=$2
   docker run -d --name "$host" --label "platform.app=$app" --network kind -e POSTGRES_DB="$db" \
@@ -100,7 +108,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE ${db}_migrator IN SCHEMA $db GRANT SELECT, INS
 ALTER DEFAULT PRIVILEGES FOR ROLE ${db}_migrator IN SCHEMA $db GRANT SELECT ON TABLES TO ${db}_readonly;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 SQL
-  # The app's connection, as a Secret the rendered Deployment reads (Render.fs).
+  # The app's connection, as a Secret the rendered Deployment reads (Render.fs). Argo CD later adopts the
+  # namespace (Cluster.fs), and leaves the Secret alone: it's not in git.
   k create namespace "$app" --dry-run=client -o yaml | k apply -f - >/dev/null
   k -n "$app" create secret generic "$db-app" \
     --from-literal=connectionString="Host=$host;Port=5432;Database=$db;Username=${db}_app;Password=local-only-app" \
@@ -109,8 +118,10 @@ SQL
 
 up() {
   mkdir -p "$state"
-  step "Render $app_yaml for the local environment (D60, D62)"
-  render_local
+  step "Renderer image (Argo CD's plugin) and the app's plan"
+  build_renderer >/dev/null
+  read_plan
+
   step "Fresh cluster $cluster (Kubernetes ${KIND_NODE_IMAGE%%@*})"
   down
   cat >"$state/kind.yaml" <<EOF
@@ -123,8 +134,8 @@ nodes:
     image: $KIND_NODE_IMAGE
     extraPortMappings:
       - { containerPort: 30875, hostPort: 9875, listenAddress: 127.0.0.1 } # the app, through the gateway
-  # Two workers, so an app's two instances sit on different nodes (D57); the app's source is mounted on both
-  # for hot reload (D61).
+  # Two workers, so an app's two instances sit on different nodes (D57); the app's repo is mounted on both
+  # for hot reload (D61) and for the git server's snapshots (D68).
   - role: worker
     image: $KIND_NODE_IMAGE
     extraMounts: [ { hostPath: "$app_repo", containerPath: /src, readOnly: true } ]
@@ -134,73 +145,80 @@ nodes:
 EOF
   kind create cluster --name "$cluster" --config "$state/kind.yaml" --kubeconfig "$kubeconfig" --wait 0s
 
-  step "Cilium $CILIUM_CHART_VERSION (network and network rules)"
+  step "Cilium $CILIUM_CHART_VERSION (the network; AKS brings its own)"
   h repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
   h repo update cilium >/dev/null
   h install cilium cilium/cilium --version "$CILIUM_CHART_VERSION" -n kube-system \
     --set ipam.mode=kubernetes --set operator.replicas=1 --wait --timeout 10m >/dev/null
   k wait --for=condition=Ready nodes --all --timeout=5m >/dev/null
 
-  step "Argo CD $ARGOCD_CHART_VERSION and the git server it reads (GitOps)"
-  h repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
-  h repo update argo >/dev/null
-  h install argocd argo/argo-cd --version "$ARGOCD_CHART_VERSION" -n argocd --create-namespace \
-    -f "$here/values/argocd.yaml" --wait --timeout 10m >/dev/null
-  sed "s|GIT_SERVER_IMAGE|$GIT_SERVER_IMAGE|" "$here/manifests/git-server.yaml" | k apply -f - >/dev/null
+  step "Images: the renderer and each service's dev target (D61)"
+  kind load docker-image "$renderer_image" --name "$cluster" >/dev/null 2>&1
+  jq -r '.services[] | "\(.image) \(.build)"' <<<"$plan" | while read -r image build; do
+    docker build -q --target dev -t "$image" "$app_repo/$build" >/dev/null
+    kind load docker-image "$image" --name "$cluster" >/dev/null 2>&1
+    echo "$image"
+  done
 
-  step "Envoy Gateway $ENVOY_GATEWAY_CHART_VERSION (the entrance)"
-  h install eg oci://docker.io/envoyproxy/gateway-helm --version "$ENVOY_GATEWAY_CHART_VERSION" \
-    -n gateway --create-namespace --wait --timeout 10m >/dev/null
-  k apply -f "$here/manifests/gateway.yaml" >/dev/null
-
-  jq -r '.databases[] | "\(.name) \(.host)"' "$rendered/plan.json" | while read -r db host; do
+  jq -r '.databases[] | "\(.name) \(.host)"' <<<"$plan" | while read -r db host; do
     step "Database $db at $host (Postgres outside the cluster)"
     database "$db" "$host"
   done
 
-  step "Images (each service's dev target, D61)"
-  jq -r '.services[] | "\(.image) \(.build)"' "$rendered/plan.json" | while read -r image build; do
-    docker build -q --target dev -t "$image" "$app_repo/$build" >/dev/null
-    kind load docker-image "$image" --name "$cluster" >/dev/null
-    echo "$image"
-  done
-
-  step "Deploy through Argo CD"
-  publish
+  step "Snapshots of the checkouts, served by the git server (D68)"
+  platform_commit=$(snapshot "$platform_root" platform)
+  app_commit=$(snapshot "$app_repo" "$app")
+  k create namespace gitops >/dev/null
+  k apply -f "$platform_root/components/gitops/local" >/dev/null
   k -n gitops rollout status deployment/git --timeout=5m >/dev/null
+
+  step "Argo CD and its root application (D67)"
+  read -r repo chart version namespace <<<"$(render chart /platform argocd)"
+  h install argocd "$chart" --repo "$repo" --version "$version" -n "$namespace" --create-namespace \
+    -f "$platform_root/components/argocd/values.yaml" -f "$platform_root/components/argocd/values-local.yaml" \
+    --wait --timeout 10m >/dev/null
   k apply -f - >/dev/null <<EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: $app
+  name: platform
   namespace: argocd
 spec:
   project: default
   source:
-    repoURL: git://git.gitops.svc.cluster.local/$app
+    repoURL: git://git.gitops.svc.cluster.local/platform
     targetRevision: main
     path: .
+    plugin:
+      name: platform
+      env:
+        - { name: MODE, value: cluster }
+        - { name: ENVIRONMENT, value: local }
   destination:
     server: https://kubernetes.default.svc
-    namespace: $app
+    namespace: argocd
   syncPolicy:
     automated: { prune: true, selfHeal: true }
 EOF
-  synced
+  synced "$platform_commit" "$app_commit"
 
   step "Ready"
   echo "App: http://localhost:9875   kubectl: kubectl --kubeconfig $kubeconfig"
 }
 
 sync() {
-  render_local
-  publish
-  synced
+  read_plan
+  if [ "$(build_renderer)" = changed ]; then
+    kind load docker-image "$renderer_image" --name "$cluster" >/dev/null 2>&1
+    k -n argocd rollout restart deployment/argocd-repo-server >/dev/null
+    k -n argocd rollout status deployment/argocd-repo-server --timeout=5m >/dev/null
+  fi
+  synced "$(snapshot "$platform_root" platform)" "$(snapshot "$app_repo" "$app")"
 }
 
 case "$command" in
   up) up ;;
   sync) sync ;;
-  down) render_local && down ;;
+  down) read_plan && down ;;
   *) echo "$usage" >&2; exit 2 ;;
 esac

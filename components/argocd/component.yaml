@@ -1,0 +1,7 @@
+# Argo CD (D67): installed by the bootstrap (the platform CLI locally, Pulumi in Azure), then manages itself
+# and everything else from this repo. Argo CD 3.6.1; the newest chart past the D65 cooldown.
+namespace: argocd
+chart:
+  repo: https://argoproj.github.io/argo-helm
+  name: argo-cd
+  version: 10.14.0

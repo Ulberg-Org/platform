@@ -1,0 +1,46 @@
+# The Gateway apps attach to (the renderer writes their HTTPRoutes). How it's exposed differs per environment:
+# <environment>/envoyproxy.yaml.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: platform
+    namespace: gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: platform
+  namespace: gateway
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# Deny by default (AGENTS.md §2; one rule with both directions, see components/argocd/common/network.yaml). The
+# proxies take requests from outside and from the cluster and forward them into it; the controller talks to
+# the Kubernetes API.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gateway
+  namespace: gateway
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities: [ world, cluster ]
+  egress:
+    - toEntities: [ cluster, kube-apiserver ]
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, k8s-app: kube-dns }
+      toPorts: [ { ports: [ { port: "53", protocol: ANY } ] } ]

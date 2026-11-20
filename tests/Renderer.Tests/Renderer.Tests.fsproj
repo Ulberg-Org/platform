@@ -4,6 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="RenderTests.fs" />
+    <Compile Include="ClusterTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -1,0 +1,23 @@
+# Locally the Gateway listens on a node port, which kind maps to http://localhost:9875 (D61).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: platform
+  namespace: gateway
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: NodePort
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              # Any node forwards to the proxy, wherever it runs (Envoy Gateway's default, Local, only answers
+              # on nodes that run a proxy; kind maps the port to the control-plane node only).
+              externalTrafficPolicy: Cluster
+              ports:
+                - name: http-80
+                  port: 80
+                  nodePort: 30875

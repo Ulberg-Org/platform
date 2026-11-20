@@ -1,0 +1,5 @@
+# Envoy Gateway (D61): the cluster's one entrance; apps attach their HTTPRoutes to its Gateway.
+namespace: gateway
+chart:
+  repo: oci://docker.io/envoyproxy/gateway-helm
+  version: v1.10.0

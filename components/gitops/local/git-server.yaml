@@ -1,0 +1,66 @@
+# The local git server (D68): Argo CD reads the platform repo and the app from it, as it reads GitHub in Azure.
+# The platform CLI commits snapshots of the checkouts (uncommitted changes included) to <app repo>/.local/gitops,
+# which the workers mount at /src/.local/gitops; this serves them read-only over git://. The bootstrap applies
+# this file before Argo CD exists; Argo CD then manages it like any component.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git
+  namespace: gitops
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: git }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: git }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: git
+          # Argo CD's image (the version in components/argocd): it's in the cluster already and has a full git.
+          image: quay.io/argoproj/argocd:v3.6.1@sha256:296e3d74f449b2ce45265613fcb68c18ed7366488360c8ea32f5f2a93d2e5c54
+          # The snapshots belong to the developer's user, not this one, so git must be told to trust them.
+          command: [ git, -c, safe.directory=*, daemon, --reuseaddr, --export-all, --base-path=/repos, /repos ]
+          ports: [ { containerPort: 9418 } ]
+          readinessProbe:
+            tcpSocket: { port: 9418 }
+            periodSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ ALL ] }
+          volumeMounts: [ { name: repos, mountPath: /repos, readOnly: true } ]
+      volumes:
+        - name: repos
+          hostPath: { path: /src/.local/gitops }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git
+  namespace: gitops
+spec:
+  selector: { app.kubernetes.io/name: git }
+  ports: [ { port: 9418, targetPort: 9418 } ]
+---
+# Deny by default (AGENTS.md §2; one rule with both directions, see components/argocd/common/network.yaml): only
+# Argo CD may read it, and it talks to nothing but DNS.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: git
+  namespace: gitops
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": argocd }
+      toPorts: [ { ports: [ { port: "9418", protocol: TCP } ] } ]
+  egress:
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, k8s-app: kube-dns }
+      toPorts: [ { ports: [ { port: "53", protocol: ANY } ] } ]
