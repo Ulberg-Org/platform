@@ -4,6 +4,7 @@
 #   platform up   <app repo>   a fresh cluster with the platform, the app's database, and the app
 #   platform sync <app repo>   hands Argo CD the checkouts as they are now (platform.yaml, environments,
 #                              components, the renderer) and waits until everything has rolled out
+#   platform test <app repo>   checks the network rules against the running cluster (D66)
 #   platform down <app repo>   removes the cluster and the database
 #
 # It only bootstraps (D67): kind, Cilium, the git server, Argo CD and its root application. Argo CD then deploys
@@ -16,7 +17,7 @@ platform_root=$(cd "$here/.." && pwd)
 # shellcheck source=versions.env
 source "$here/versions.env"
 
-usage="usage: platform up|sync|down <app repo>"
+usage="usage: platform up|sync|test|down <app repo>"
 command=${1:?$usage}
 app_repo=$(cd "${2:?$usage}" && pwd)
 [ -f "$app_repo/platform.yaml" ] || { echo "No platform.yaml in $app_repo" >&2; exit 1; }
@@ -96,6 +97,62 @@ grafana_for_claude() {
   curl -sf -u "$auth" -H 'Content-Type: application/json' "$api/serviceaccounts/$id/tokens" \
     -d "{\"name\":\"mcp-$(date +%s)\"}" | jq -r .key >"$token"
   chmod 600 "$token"
+}
+
+# The network rules, checked against the running cluster (D66). Each check opens a TCP connection from a pod
+# and expects it to connect or to be blocked; by IP address, so a blocked DNS lookup can't pass for a blocked
+# connection. Probe pods run Argo CD's image (in the cluster already, with bash).
+network_test() {
+  local failed=0 probe_image kube_api git_ip collector_ip
+  probe_image=$(k -n gitops get deployment git -o jsonpath='{.spec.template.spec.containers[0].image}')
+  kube_api=$(k -n default get service kubernetes -o jsonpath='{.spec.clusterIP}')
+  git_ip=$(k -n gitops get pods -o jsonpath='{.items[0].status.podIP}')
+  collector_ip=$(k -n observability get pods -l app.kubernetes.io/name=opentelemetry-collector -o jsonpath='{.items[0].status.podIP}')
+
+  connect() { echo "timeout 3 bash -c '</dev/tcp/$1/$2' 2>/dev/null"; } # ip port
+  # check <allowed|blocked> <description> <command...>: runs the command, which connects or fails.
+  check() {
+    local want=$1 what=$2 got
+    shift 2
+    if "$@" >/dev/null 2>&1; then got=allowed; else got=blocked; fi
+    if [ "$got" = "$want" ]; then printf '  ok    %-8s %s\n' "$got" "$what"
+    else printf '  FAIL  %-8s %s (expected %s)\n' "$got" "$what" "$want"; failed=1; fi
+  }
+  from_service() { k -n "$app" exec "deployment/$1" -c "$1" -- bash -c "$(connect "$2" "$3")"; } # service ip port
+  from_new_pod() { # namespace labels ip port: a fresh pod with only these labels
+    k -n "$1" run "probe-$RANDOM" --image="$probe_image" --restart=Never --rm -i --quiet --labels="$2" \
+      --command -- bash -c "$(connect "$3" "$4")"
+  }
+
+  local name database db db_ip host want ip port health
+  for name in $(jq -r '.services[].name' <<<"$plan"); do
+    database=$(jq -r --arg n "$name" '.services[] | select(.name == $n) | .database // empty' <<<"$plan")
+    ip=$(k -n "$app" get pods -l "app.kubernetes.io/name=$name" -o jsonpath='{.items[0].status.podIP}')
+    port=$(k -n "$app" get deployment "$name" -o jsonpath='{.spec.template.spec.containers[0].ports[0].containerPort}')
+    health=$(k -n "$app" get deployment "$name" -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.port}')
+    echo "$name"
+    while read -r db host; do
+      db_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$host")
+      [ "$db" = "$database" ] && want=allowed || want=blocked
+      check "$want" "$name -> database $db" from_service "$name" "$db_ip" 5432
+    done < <(jq -r '.databases[] | "\(.name) \(.host)"' <<<"$plan")
+    check allowed "$name -> telemetry collector" from_service "$name" "$collector_ip" 4317
+    check blocked "$name -> internet" from_service "$name" 1.1.1.1 443
+    check blocked "$name -> Kubernetes API" from_service "$name" "$kube_api" 443
+    check blocked "$name -> git server" from_service "$name" "$git_ip" 9418
+    check allowed "gateway -> $name API port" from_new_pod gateway probe=gateway "$ip" "$port"
+    check blocked "gateway -> $name health port" from_new_pod gateway probe=gateway "$ip" "$health"
+    check blocked "unlabelled pod in $app -> $name" from_new_pod "$app" probe=unlabelled "$ip" "$port"
+    check blocked "pod in another namespace -> $name" from_new_pod default probe=other "$ip" "$port"
+  done
+  echo "databases and platform"
+  while read -r db host; do
+    db_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$host")
+    check blocked "unlabelled pod in $app -> database $db" from_new_pod "$app" probe=unlabelled "$db_ip" 5432
+    check blocked "pod in another namespace -> database $db" from_new_pod default probe=other "$db_ip" 5432
+  done < <(jq -r '.databases[] | "\(.name) \(.host)"' <<<"$plan")
+  check blocked "pod in another namespace -> git server" from_new_pod default probe=other "$git_ip" 9418
+  return $failed
 }
 
 down() {
@@ -247,6 +304,7 @@ sync() {
 case "$command" in
   up) up ;;
   sync) sync ;;
-  down) read_plan && down ;;
+  test) build_renderer >/dev/null && read_plan && network_test ;;
+  down) build_renderer >/dev/null && read_plan && down ;;
   *) echo "$usage" >&2; exit 2 ;;
 esac

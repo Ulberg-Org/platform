@@ -4,7 +4,7 @@ mode: release
 registry: crplatform21784576.azurecr.io
 kubernetesVersion: "1.37"
 git: https://github.com/Ulberg-Org
-components: [ argocd, gateway ]
+components: [ argocd, baseline, gateway ]
 database:
   # Postgres Flexible Server, private access (§9.1), one per database. {app} and {database} are filled in.
   host: "{app}-{database}-dev.postgres.database.azure.com"
