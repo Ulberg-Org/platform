@@ -4,9 +4,9 @@
     "net10.0": {
       "FSharp.Core": {
         "type": "Direct",
-        "requested": "[11.0.101, )",
-        "resolved": "11.0.101",
-        "contentHash": "XL1wfb0gujXAtnJfO7rYfxKgwufCiT8aOKqGoqKB83oxRAZ9+yiNWXinHO4x9StYuunTl/AH8eERc0hv7UXJVQ=="
+        "requested": "[10.1.400, )",
+        "resolved": "10.1.400",
+        "contentHash": "H9wlZ/tWgNp+Q4WQ5aUSi3XOBXrL6z+UkR0PNeyDFyoZR3c3PbtA21B9FqlthrhEwQ6f5AtQV0JLhBBDqjjscw=="
       },
       "FsToolkit.ErrorHandling": {
         "type": "Direct",
@@ -101,11 +101,11 @@
       },
       "Pulumi.Random": {
         "type": "Direct",
-        "requested": "[4.21.4, )",
-        "resolved": "4.21.4",
-        "contentHash": "sU7oOM5h9aYDoiDSp7Wcnm+pOb14WNuzjPZm0gqyqj490e3T9k+Nu42/FcWFxj/AwTUKm9sn+hZWvxo2omXLuw==",
+        "requested": "[4.21.6, )",
+        "resolved": "4.21.6",
+        "contentHash": "PR1NDcUFhcfUJLjjfyC70fgCwEk94xj1CwimHqyaW5qhjZJ8x1oskvM/0AQMUgwk6XEgdEs7eDgWyWYeqL73nA==",
         "dependencies": {
-          "Pulumi": "3.114.2"
+          "Pulumi": "3.116.2"
         }
       },
       "YamlDotNet": {
@@ -352,7 +352,7 @@
       "platform.parsing": {
         "type": "Project",
         "dependencies": {
-          "FSharp.Core": "[11.0.101, )",
+          "FSharp.Core": "[10.1.400, )",
           "FsToolkit.ErrorHandling": "[5.2.0, )",
           "YamlDotNet": "[18.1.0, )"
         }
