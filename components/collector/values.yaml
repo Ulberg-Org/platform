@@ -2,6 +2,9 @@ fullnameOverride: collector
 mode: deployment
 image:
   repository: otel/opentelemetry-collector-contrib
+# The cluster's events (scheduling failures, OOM kills, failed probes, image pulls), collected once, here.
+presets:
+  kubernetesEvents: { enabled: true }
 # Only OTLP in; the chart's other default receivers (Jaeger, Zipkin, its own Prometheus) stay off.
 ports:
   jaeger-compact: { enabled: false }
@@ -17,6 +20,10 @@ config:
     # values-<environment>.yaml names the environment (deployment.environment.name).
     resource:
       attributes: []
+    # The cluster's events arrive without a service; this is their name in Loki.
+    resource/events:
+      attributes:
+        - { key: service.name, value: kubernetes-events, action: upsert }
   exporters:
     otlp_grpc/tempo:
       endpoint: tempo:4317
@@ -28,6 +35,7 @@ config:
   service:
     pipelines:
       traces: { receivers: [ otlp ], processors: [ memory_limiter, resource, batch ], exporters: [ otlp_grpc/tempo ] }
+      logs/events: { receivers: [ k8sobjects ], processors: [ memory_limiter, resource, resource/events, batch ], exporters: [ otlp_http/loki ] }
       logs: { receivers: [ otlp ], processors: [ memory_limiter, resource, batch ], exporters: [ otlp_http/loki ] }
       metrics: { receivers: [ otlp ], processors: [ memory_limiter, resource, batch ], exporters: [ otlp_http/prometheus ] }
 securityContext:

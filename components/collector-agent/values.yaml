@@ -1,0 +1,39 @@
+fullnameOverride: collector-agent
+mode: daemonset
+image:
+  repository: otel/opentelemetry-collector-contrib
+presets:
+  # Every container's log from /var/log/pods, parsed (container runtime format, multi-line), not its own.
+  logsCollection: { enabled: true }
+  # Namespace, pod, container and labels on every line, from the Kubernetes API.
+  kubernetesAttributes: { enabled: true }
+# On every node, the control plane included (its audit log, locally).
+tolerations:
+  - { key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule }
+ports:
+  jaeger-compact: { enabled: false }
+  jaeger-thrift: { enabled: false }
+  jaeger-grpc: { enabled: false }
+  zipkin: { enabled: false }
+  otlp: { enabled: false }
+  otlp-http: { enabled: false }
+config:
+  receivers:
+    jaeger: null
+    zipkin: null
+    prometheus: null
+    otlp: null
+  exporters:
+    otlp_grpc/collector:
+      endpoint: collector:4317
+      tls: { insecure: true }
+  service:
+    pipelines:
+      logs: { receivers: [ filelog ], processors: [ k8sattributes, memory_limiter, batch ], exporters: [ otlp_grpc/collector ] }
+      traces: null
+      metrics: null
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ ALL ] }
+  seccompProfile: { type: RuntimeDefault }

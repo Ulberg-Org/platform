@@ -23,3 +23,13 @@ spec:
     - toEndpoints:
         - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, k8s-app: kube-dns }
       toPorts: [ { ports: [ { port: "53", protocol: ANY } ] } ]
+---
+# The gateway sends its spans and access logs to the collector, a Service in this namespace (D71).
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: gateway-telemetry
+  namespace: observability
+spec:
+  from: [ { group: gateway.envoyproxy.io, kind: EnvoyProxy, namespace: gateway } ]
+  to: [ { group: "", kind: Service, name: collector } ]

@@ -281,6 +281,8 @@ up() {
 
   step "Fresh cluster $cluster (Kubernetes ${KIND_NODE_IMAGE%%@*})"
   down
+  # The Kubernetes API's audit policy (D71), mounted into the control-plane node.
+  mkdir -p "$state/audit" && cp "$here/audit-policy.yaml" "$state/audit/policy.yaml"
   cat >"$state/kind.yaml" <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -289,6 +291,20 @@ networking:
 nodes:
   - role: control-plane
     image: $KIND_NODE_IMAGE
+    # The API server writes an audit log, which the agent collector on this node reads (D71).
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            - { name: audit-policy-file, value: /etc/kubernetes/audit/policy.yaml }
+            - { name: audit-log-path, value: /var/log/kubernetes/audit/audit.log }
+            - { name: audit-log-maxsize, value: "50" }
+            - { name: audit-log-maxbackup, value: "2" }
+          extraVolumes:
+            - { name: audit-policy, hostPath: /etc/kubernetes/audit, mountPath: /etc/kubernetes/audit, readOnly: true, pathType: Directory }
+            - { name: audit-log, hostPath: /var/log/kubernetes/audit, mountPath: /var/log/kubernetes/audit, pathType: DirectoryOrCreate }
+    extraMounts: [ { hostPath: "$state/audit", containerPath: /etc/kubernetes/audit, readOnly: true } ]
     extraPortMappings:
       - { containerPort: 30875, hostPort: 9875, listenAddress: 127.0.0.1 } # the app, through the gateway
       - { containerPort: 30876, hostPort: 9876, listenAddress: 127.0.0.1 } # Grafana

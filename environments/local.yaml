@@ -7,7 +7,7 @@ mode: develop
 kubernetesVersion: "1.37"
 # Argo CD reads snapshots of the checkouts from the git server in the cluster (D68).
 git: git://git.gitops.svc.cluster.local
-components: [ argocd, baseline, gateway, gitops, observability, collector, loki, tempo, prometheus, grafana ]
+components: [ argocd, baseline, gateway, gitops, observability, collector, collector-agent, loki, tempo, prometheus, grafana ]
 database:
   # Postgres runs outside the cluster, as in Azure: one container per database on kind's Docker network.
   # {app} and {database} are filled in by the renderer.
