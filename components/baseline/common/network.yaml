@@ -11,6 +11,9 @@ metadata:
 spec:
   endpointSelector:
     matchExpressions:
+      # Pods only: Cilium's own health endpoints have no namespace and must stay reachable.
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: Exists
       - key: k8s:io.kubernetes.pod.namespace
         operator: NotIn
         values: [ kube-system, local-path-storage, argocd, gateway, gitops, observability ]

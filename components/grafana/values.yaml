@@ -38,3 +38,8 @@ datasources:
           serviceMap: { datasourceUid: prometheus }
           nodeGraph: { enabled: true }
 testFramework: { enabled: false }
+# Dashboards and alert rules as code (D71): the sidecar loads the ConfigMaps in common/ (labelled grafana_dashboard
+# and grafana_alert) when Grafana starts and whenever they change.
+sidecar:
+  dashboards: { enabled: true, label: grafana_dashboard }
+  alerts: { enabled: true, label: grafana_alert }

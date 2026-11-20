@@ -1,0 +1,9 @@
+# The collector on every node (D71): reads every container's log (and locally the Kubernetes API's audit log),
+# labels each line with its namespace, pod and container, and forwards it to the central collector, which stays
+# the one way out to Loki, Tempo and Prometheus. The same chart as components/collector, in daemonset mode.
+namespace: observability
+chart:
+  repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+  name: opentelemetry-collector
+  version: 0.178.3
+  digest: sha256:6c5df6fcb8dfa54b9514eeae08b47f641f32c3ab236d8881a6008599b4f18b12

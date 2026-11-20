@@ -5,6 +5,13 @@ notifications:
   enabled: false
 applicationSet:
   replicas: 0
+# Argo CD's metrics (sync and health per application, D71), for Prometheus.
+controller:
+  metrics: { enabled: true, service: { annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8082" } } }
+server:
+  metrics: { enabled: true, service: { annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8083" } } }
+repoServer:
+  metrics: { enabled: true, service: { annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8084" } } }
 configs:
   # The `platform` plugin (D68): the renderer, in a sidecar of the repo server (values-<environment>.yaml
   # says which image). MODE, ENVIRONMENT and TAG come from the Application (Cluster.fs).

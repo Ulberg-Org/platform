@@ -1,10 +1,38 @@
-# Locally the Gateway listens on a node port, which kind maps to http://localhost:9875 (D61).
+# Locally the Gateway listens on a node port, which kind maps to http://localhost:9875 (D61). Its telemetry block
+# is the same in every environment's EnvoyProxy.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:
   name: platform
   namespace: gateway
 spec:
+  # The gateway's own spans and access logs (D71), over OTLP to the collector. Spans continue the request's W3C
+  # traceparent (from the browser, later) and pass it on, so one trace runs browser -> gateway -> backend -> DB.
+  telemetry:
+    tracing:
+      samplingRate: 100
+      provider:
+        type: OpenTelemetry
+        backendRefs: [ { name: collector, namespace: observability, port: 4317 } ]
+    accessLog:
+      settings:
+        - format:
+            type: JSON
+            json:
+              trace_id: "%TRACE_ID%"
+              method: "%REQ(:METHOD)%"
+              path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+              route: "%ROUTE_NAME%"
+              status: "%RESPONSE_CODE%"
+              flags: "%RESPONSE_FLAGS%"
+              duration_ms: "%DURATION%"
+              upstream: "%UPSTREAM_HOST%"
+              request_id: "%REQ(X-REQUEST-ID)%"
+          sinks:
+            - type: OpenTelemetry
+              openTelemetry:
+                backendRefs: [ { name: collector, namespace: observability, port: 4317 } ]
+                resources: { service.name: gateway }
   provider:
     type: Kubernetes
     kubernetes:

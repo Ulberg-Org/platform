@@ -5,6 +5,8 @@ registry: crplatform21784576.azurecr.io
 kubernetesVersion: "1.37"
 git: https://github.com/Ulberg-Org
 components: [ argocd, baseline, gateway ]
+# Network flow logs in AKS need Advanced Container Networking Services (D70); decided in Phase 3.
+networkFlows: false
 database:
   # Postgres Flexible Server, private access (§9.1), one per database. {app} and {database} are filled in.
   host: "{app}-{database}-dev.postgres.database.azure.com"

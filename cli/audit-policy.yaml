@@ -1,0 +1,18 @@
+# What the local Kubernetes API records in its audit log (D71), which the agent collector sends to Loki: who
+# changed what, and who touched Secrets, never their contents. AKS's audit log follows Azure's own policy.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages: [ RequestReceived ]
+rules:
+  # Secrets: who read or changed which one, and when. Never the request or response, which holds the values.
+  - level: Metadata
+    resources: [ { group: "", resources: [ secrets ] } ]
+  # Who may do what (RBAC): every change in full.
+  - level: RequestResponse
+    verbs: [ create, update, patch, delete, deletecollection ]
+    resources: [ { group: rbac.authorization.k8s.io } ]
+  # Every other change: who changed what, and when.
+  - level: Metadata
+    verbs: [ create, update, patch, delete, deletecollection ]
+  # Reads are too many to keep, and say little.
+  - level: None

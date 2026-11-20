@@ -136,6 +136,12 @@ let tests =
                 Expect.equal byName["worker"] None "the worker has none"
             }
 
+            test "the environment says whether network decisions are recorded, and the plan passes it on (D71)" {
+                Expect.isTrue (environment "local").networkFlows "Hubble locally"
+                Expect.isFalse (environment "dev").networkFlows "dev decides with Phase 3 (ACNS)"
+                Expect.isTrue (Render.plan (App.parse app |> ok) (environment "local") "dev").networkFlows "in the plan"
+            }
+
             test "local and dev pin the same Kubernetes minor version (D61)" {
                 Expect.equal (environment "local").kubernetesVersion (environment "dev").kubernetesVersion "1.37"
             }

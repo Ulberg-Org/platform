@@ -1,0 +1,5 @@
+# Claude's Kubernetes MCP server (D71, AGENTS.md §3): for infra developers' Claude only, which is why it's here
+# and not in an app repo. Read-only twice over: the server refuses to change anything, and its identity, the
+# local cluster's `claude` service account, holds only Kubernetes' `view` role (no Secrets).
+read_only = true
+kubeconfig = "../todo/.local/kubeconfig-claude"

@@ -1,0 +1,35 @@
+# Locally the agent on the control plane also reads the Kubernetes API's audit log, which kind writes there
+# (platform CLI, D71): who changed what in the cluster. In Azure, AKS's audit log comes from Azure (Phase 5).
+# The API server writes it readable by root only, so locally the agent runs as root: still without any
+# capability and on a read-only filesystem.
+podSecurityContext: { runAsUser: 0, runAsGroup: 0 }
+extraVolumes:
+  - name: audit
+    hostPath: { path: /var/log/kubernetes/audit, type: DirectoryOrCreate }
+  # Hubble's dropped flows (D71), which Cilium writes on every node.
+  - name: hubble
+    hostPath: { path: /var/run/cilium/hubble, type: DirectoryOrCreate }
+extraVolumeMounts:
+  - { name: audit, mountPath: /var/log/kubernetes/audit, readOnly: true }
+  - { name: hubble, mountPath: /var/run/cilium/hubble, readOnly: true }
+config:
+  receivers:
+    filelog/audit:
+      include: [ /var/log/kubernetes/audit/audit.log ]
+      start_at: beginning
+      operators:
+        - type: json_parser
+          timestamp: { parse_from: attributes.requestReceivedTimestamp, layout_type: gotime, layout: "2006-01-02T15:04:05.999999999Z07:00" }
+      resource:
+        service.name: kubernetes-audit
+    filelog/network:
+      include: [ /var/run/cilium/hubble/events.log ]
+      start_at: beginning
+      operators:
+        - type: json_parser
+          timestamp: { parse_from: attributes.time, layout_type: gotime, layout: "2006-01-02T15:04:05.999999999Z07:00" }
+      resource:
+        service.name: network-flows
+  service:
+    pipelines:
+      logs: { receivers: [ filelog, filelog/audit, filelog/network ], processors: [ k8sattributes, memory_limiter, batch ], exporters: [ otlp_grpc/collector ] }

@@ -152,16 +152,28 @@ rolled_out() {
   done
 }
 
-# Why something isn't ready: the Argo CD applications that aren't synced and healthy, and the last lines of
-# every pod of the app that isn't ready.
+# Why something isn't ready: the Argo CD applications that aren't synced and healthy, and the app's pods that
+# aren't ready.
 not_ready() {
-  local pod
   echo "Not ready after $wait:" >&2
   k -n argocd get applications --no-headers | awk '$2 != "Synced" || $3 != "Healthy" {print "  Argo CD: " $1 " " $2 ", " $3}' >&2
-  for pod in $(k -n "$app" get pods --no-headers | awk '{split($2, r, "/"); if (r[1] != r[2]) print $1}'); do
-    echo "  $pod, last lines:" >&2
-    k -n "$app" logs "$pod" --tail=8 2>&1 | sed 's/^/    /' >&2
+  failing_pods "$app"
+}
+
+# The pods in a namespace that aren't ready, each with its last log lines (of the crash before, if it restarted).
+failing_pods() { # namespace
+  local pod
+  for pod in $(k -n "$1" get pods --no-headers | awk '{split($2, r, "/"); if (r[1] != r[2]) print $1}'); do
+    echo "  $1/$pod, last lines:" >&2
+    { k -n "$1" logs "$pod" --previous --tail=8 2>/dev/null || k -n "$1" logs "$pod" --tail=8 2>&1; } | sed 's/^/    /' >&2
   done
+}
+
+# A bootstrap step that waits for its pods: fails within its time, saying which pods and why (D61 speed).
+installed() { # namespace, then the command
+  local ns=$1
+  shift
+  "$@" >/dev/null 2>&1 || { echo "Not ready: $ns" >&2; failing_pods "$ns"; exit 1; }
 }
 
 # Claude's own Grafana account (D41 locally): a Viewer service account with a token in $state, which the app
@@ -234,6 +246,26 @@ network_test() {
   return $failed
 }
 
+# Claude's own Kubernetes identity locally (D41, D71): a service account with the built-in `view` role (reads all
+# but Secrets) and a kubeconfig for it in $state, which the platform repo's Kubernetes MCP server uses. For
+# infra developers' Claude; an app developer's Claude keeps only the telemetry (AGENTS.md §3).
+kubernetes_for_claude() {
+  local file="$state/kubeconfig-claude" server ca token
+  k -n kube-system create serviceaccount claude --dry-run=client -o yaml | k apply -f - >/dev/null
+  k create clusterrolebinding claude-view --clusterrole=view --serviceaccount=kube-system:claude \
+    --dry-run=client -o yaml | k apply -f - >/dev/null
+  server=$(kubectl --kubeconfig "$kubeconfig" config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+  ca=$(kubectl --kubeconfig "$kubeconfig" config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+  token=$(k -n kube-system create token claude --duration=24h)
+  rm -f "$file"
+  kubectl config --kubeconfig "$file" set-cluster local --server="$server" >/dev/null
+  kubectl config --kubeconfig "$file" set clusters.local.certificate-authority-data "$ca" >/dev/null
+  kubectl config --kubeconfig "$file" set-credentials claude --token="$token" >/dev/null
+  kubectl config --kubeconfig "$file" set-context claude --cluster=local --user=claude >/dev/null
+  kubectl config --kubeconfig "$file" use-context claude >/dev/null
+  chmod 600 "$file"
+}
+
 down() {
   kind delete cluster --name "$cluster" 2>/dev/null || true
   docker ps -aq --filter "label=platform.app=$app" | xargs -r docker rm -f >/dev/null
@@ -248,7 +280,7 @@ database() { # name host
   rm -rf "$logs" && mkdir -p "$logs" && chmod 777 "$logs"
   docker run -d --name "$host" --label "platform.app=$app" --network kind -e POSTGRES_DB="$db" \
     -e POSTGRES_PASSWORD=local-only-superuser -v "$logs:/var/log/postgresql" "$POSTGRES_IMAGE" \
-    postgres -c logging_collector=on -c log_destination=jsonlog -c log_directory=/var/log/postgresql \
+    postgres -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all -c logging_collector=on -c log_destination=jsonlog -c log_directory=/var/log/postgresql \
     -c log_filename=postgresql.log -c log_rotation_age=0 -c log_connections=on -c log_disconnections=on \
     -c log_min_duration_statement=200 -c log_file_mode=0644 >/dev/null
   until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
@@ -263,10 +295,24 @@ GRANT USAGE ON SCHEMA $db TO ${db}_app, ${db}_readonly;
 ALTER DEFAULT PRIVILEGES FOR ROLE ${db}_migrator IN SCHEMA $db GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${db}_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE ${db}_migrator IN SCHEMA $db GRANT SELECT ON TABLES TO ${db}_readonly;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+-- Statistics (D64): per-query statistics, a monitor role for the collector (no data, only statistics), and
+-- every query's statistics for the read-only role, which Claude's Postgres MCP uses (EXPLAIN, top queries).
+CREATE EXTENSION pg_stat_statements;
+CREATE ROLE ${db}_monitor LOGIN PASSWORD 'local-only-monitor' IN ROLE pg_monitor;
+GRANT pg_read_all_stats TO ${db}_readonly;
+-- The read-only role (developers, and Claude's Postgres MCP, D75) may EXPLAIN ANALYZE: its privileges allow only
+-- SELECT, its transactions are read-only by default, and nothing runs longer than 30 seconds.
+ALTER ROLE ${db}_readonly SET default_transaction_read_only = on;
+ALTER ROLE ${db}_readonly SET statement_timeout = '30s';
 SQL
   # The app's connection, as a Secret the rendered Deployment reads (Render.fs). Argo CD later adopts the
   # namespace (Cluster.fs), and leaves the Secret alone: it's not in git.
   k create namespace "$app" --dry-run=client -o yaml | k apply -f - >/dev/null
+  # The collector's connection as the monitor role (one database for now; several need one receiver each).
+  k create namespace observability --dry-run=client -o yaml | k apply -f - >/dev/null
+  k -n observability create secret generic postgres-monitor --from-literal=endpoint="$host:5432" \
+    --from-literal=username="${db}_monitor" --from-literal=password=local-only-monitor \
+    --dry-run=client -o yaml | k apply -f - >/dev/null
   k -n "$app" create secret generic "$db-app" \
     --from-literal=connectionString="Host=$host;Port=5432;Database=$db;Username=${db}_app;Password=local-only-app" \
     --dry-run=client -o yaml | k apply -f - >/dev/null
@@ -281,6 +327,8 @@ up() {
 
   step "Fresh cluster $cluster (Kubernetes ${KIND_NODE_IMAGE%%@*})"
   down
+  # The Kubernetes API's audit policy (D71), mounted into the control-plane node.
+  mkdir -p "$state/audit" && cp "$here/audit-policy.yaml" "$state/audit/policy.yaml"
   cat >"$state/kind.yaml" <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -289,6 +337,20 @@ networking:
 nodes:
   - role: control-plane
     image: $KIND_NODE_IMAGE
+    # The API server writes an audit log, which the agent collector on this node reads (D71).
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            - { name: audit-policy-file, value: /etc/kubernetes/audit/policy.yaml }
+            - { name: audit-log-path, value: /var/log/kubernetes/audit/audit.log }
+            - { name: audit-log-maxsize, value: "50" }
+            - { name: audit-log-maxbackup, value: "2" }
+          extraVolumes:
+            - { name: audit-policy, hostPath: /etc/kubernetes/audit, mountPath: /etc/kubernetes/audit, readOnly: true, pathType: Directory }
+            - { name: audit-log, hostPath: /var/log/kubernetes/audit, mountPath: /var/log/kubernetes/audit, pathType: DirectoryOrCreate }
+    extraMounts: [ { hostPath: "$state/audit", containerPath: /etc/kubernetes/audit, readOnly: true } ]
     extraPortMappings:
       - { containerPort: 30875, hostPort: 9875, listenAddress: 127.0.0.1 } # the app, through the gateway
       - { containerPort: 30876, hostPort: 9876, listenAddress: 127.0.0.1 } # Grafana
@@ -307,8 +369,26 @@ EOF
   step "Cilium $CILIUM_CHART_VERSION (the network; AKS brings its own)"
   h repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
   h repo update cilium >/dev/null
-  h install cilium cilium/cilium --version "$CILIUM_CHART_VERSION" -n kube-system \
-    --set ipam.mode=kubernetes --set operator.replicas=1 --wait --timeout 10m >/dev/null
+  # With the environment's networkFlows (D71): Hubble records the network's decisions. Dropped flows go to a file
+  # on each node, which the agent collector reads; flow and drop counts per namespace go to Prometheus.
+  hubble=$(jq -r .networkFlows <<<"$plan")
+  cat >"$state/cilium.yaml" <<EOF
+ipam: { mode: kubernetes }
+operator: { replicas: 1 }
+hubble:
+  enabled: $hubble
+  relay: { enabled: false }
+  metrics:
+    enabled: [ dns, drop, tcp, "flow:sourceContext=namespace;destinationContext=namespace", "policy:sourceContext=namespace;destinationContext=namespace" ]
+    serviceAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9965" }
+  export:
+    static:
+      enabled: $hubble
+      filePath: /var/run/cilium/hubble/events.log
+      allowList: [ '{"verdict":["DROPPED"]}' ] # Hubble flow filters, as JSON
+EOF
+  installed kube-system h install cilium cilium/cilium --version "$CILIUM_CHART_VERSION" -n kube-system \
+    -f "$state/cilium.yaml" --wait --timeout 3m
   k wait --for=condition=Ready nodes --all --timeout=5m >/dev/null
 
   step "Images: the renderer and each service's dev target (D61)"
@@ -333,9 +413,9 @@ EOF
   h pull "$chart" --repo "$repo" --version "$version" -d "$state/charts" >/dev/null
   [ "sha256:$(sha256 "$state"/charts/*.tgz)" = "$digest" ] ||
     { echo "Argo CD's chart $chart $version isn't the package components/argocd pins ($digest)" >&2; exit 1; }
-  h install argocd "$state"/charts/*.tgz -n "$namespace" --create-namespace \
+  installed "$namespace" h install argocd "$state"/charts/*.tgz -n "$namespace" --create-namespace \
     -f "$platform_root/components/argocd/values.yaml" -f "$platform_root/components/argocd/values-local.yaml" \
-    --wait --timeout 10m >/dev/null
+    --wait --timeout 5m
   k apply -f - >/dev/null <<EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -361,6 +441,7 @@ spec:
 EOF
   synced "$platform_commit" "$app_commit"
   grafana_for_claude
+  kubernetes_for_claude
 
   step "Ready"
   echo "App:     http://localhost:9875"
@@ -395,6 +476,7 @@ sync() {
   for name in $(service_images); do k -n "$app" rollout restart "deployment/$name" >/dev/null; done
   synced "$platform_commit" "$(snapshot "$app_repo" "$app")"
   grafana_for_claude
+  kubernetes_for_claude
 }
 
 case "$command" in
