@@ -16,7 +16,7 @@ let private argocd =
         "argocd"
         [ "components/argocd/values.yaml"; "components/argocd/values-local.yaml" ]
         [ "common" ]
-        "namespace: argocd\nchart: { repo: https://argoproj.github.io/argo-helm, name: argo-cd, version: 10.14.0 }"
+        "namespace: argocd\nchart: { repo: https://argoproj.github.io/argo-helm, name: argo-cd, version: 10.14.0, digest: sha256:0000000000000000000000000000000000000000000000000000000000000000 }"
     |> ok
 
 let private gateway =
@@ -24,7 +24,7 @@ let private gateway =
         "gateway"
         []
         [ "common" ]
-        "namespace: gateway\nchart: { repo: oci://docker.io/envoyproxy/gateway-helm, version: v1.10.0 }"
+        "namespace: gateway\nchart: { repo: oci://docker.io/envoyproxy/gateway-helm, version: v1.10.0, digest: sha256:0000000000000000000000000000000000000000000000000000000000000000 }"
     |> ok
 
 let private todo tags =
@@ -54,6 +54,18 @@ let tests =
                     let file = Path.Combine(repo, "components", c, "component.yaml")
                     Expect.isTrue (File.Exists file) $"components/{c}/component.yaml"
                     Expect.isOk (Cluster.parseComponent c [] [] (File.ReadAllText file)) $"components/{c} parses"
+            }
+
+            test "a chart is pinned by its content (D65): without its sha256 digest it's refused" {
+                let withoutDigest =
+                    "namespace: x\nchart: { repo: https://example.org, name: x, version: 1.0.0 }"
+
+                Expect.isError (Cluster.parseComponent "x" [] [] withoutDigest) "no digest"
+
+                let badDigest =
+                    "namespace: x\nchart: { repo: https://example.org, name: x, version: 1.0.0, digest: md5:abc }"
+
+                Expect.isError (Cluster.parseComponent "x" [] [] badDigest) "not sha256"
             }
 
             test "an app may only deploy ordinary kinds, into its own namespace, from its own repo" {

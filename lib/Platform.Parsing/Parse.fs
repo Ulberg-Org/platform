@@ -14,6 +14,14 @@ open YamlDotNet.Serialization
 let required (field: string) (x: 'a option) : Result<'a, string> =
     x |> Result.requireSome $"'{field}' is missing"
 
+/// A DTO string that YAML left out arrives empty-handed (System.Text.Json fills a missing member with its
+/// default), so it's reported as missing before any check looks inside it.
+let present (field: string) (s: string) : Result<string, string> =
+    if String.IsNullOrEmpty s then
+        Error $"'{field}' is missing"
+    else
+        Ok s
+
 let notEmpty (field: string) (s: string) : Result<string, string> =
     if String.IsNullOrWhiteSpace s then
         Error $"'{field}' is empty"
@@ -26,10 +34,13 @@ let guid (field: string) (s: string) : Result<Guid, string> =
     | _ -> Error $"'{field}': '{s}' is not an object ID"
 
 let matches (pattern: Regex) (field: string) (s: string) : Result<string, string> =
-    if pattern.IsMatch s then
-        Ok s
-    else
-        Error $"'{field}': '{s}' is not valid"
+    let valid (s: string) =
+        if pattern.IsMatch s then
+            Ok s
+        else
+            Error $"'{field}': '{s}' is not valid"
+
+    present field s |> Result.bind valid
 
 let between (field: string) (low: int) (high: int) (n: int) : Result<int, string> =
     if n >= low && n <= high then
@@ -44,10 +55,13 @@ let atLeast (field: string) (low: int) (n: int) : Result<int, string> =
         Error $"'{field}': {n} is below {low}"
 
 let startsWith (field: string) (prefix: string) (s: string) : Result<string, string> =
-    if s.StartsWith prefix then
-        Ok s
-    else
-        Error $"'{field}': '{s}' must start with {prefix}"
+    let starts (s: string) =
+        if s.StartsWith prefix then
+            Ok s
+        else
+            Error $"'{field}': '{s}' must start with {prefix}"
+
+    present field s |> Result.bind starts
 
 let equals (field: string) (expected: string) (s: string) : Result<unit, string> =
     if s = expected then

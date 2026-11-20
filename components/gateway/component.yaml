@@ -3,3 +3,4 @@ namespace: gateway
 chart:
   repo: oci://docker.io/envoyproxy/gateway-helm
   version: v1.10.0
+  digest: sha256:0f72c9050c33dbaab39b865e8cb5ed77f263720b22368eda4ce687077649e659

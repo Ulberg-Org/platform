@@ -10,13 +10,15 @@ permissions:
 
 env:
   GITLEAKS_VERSION: 8.21.2
+  # The release tarball's SHA-256, pinned here (D65): a checksum fetched from the same release proves nothing.
+  GITLEAKS_SHA256: 5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
 
 jobs:
   secret-scan:
     name: secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install gitleaks (checksum verified)
@@ -24,7 +26,7 @@ jobs:
           base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
           tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           curl -sSfLO "$base/$tarball"
-          curl -sSfL "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " $tarball\$" | sha256sum --check
+          echo "$GITLEAKS_SHA256  $tarball" | sha256sum --check
           tar -xzf "$tarball" gitleaks
       - name: Scan full history
         run: ./gitleaks git --redact --verbose .
@@ -33,7 +35,7 @@ jobs:
     name: prompt log
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check .prompts/ format
         run: python3 .github/scripts/check_prompt_log.py
       - name: Test the prompt-log hook
@@ -50,8 +52,8 @@ jobs:
     name: dotnet (format, build, test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - run: dotnet tool restore
@@ -69,5 +71,7 @@ jobs:
         run: dotnet run --project tests/Shared.Tests -c Release --no-build
       - name: Test the renderer (D60, D62)
         run: dotnet run --project tests/Renderer.Tests -c Release --no-build
+      - name: Platform charts are the packages their digests pin (D65)
+        run: .github/scripts/check_chart_digests.sh
       - name: Workflows follow the stack order (D53)
         run: .github/scripts/check_stack_order.sh

@@ -4,7 +4,7 @@
 ///   app <platform.yaml> <environment.yaml> <tag>   an app's manifests (what Argo CD deploys for it)
 ///   plan <platform.yaml> <environment.yaml>        what the platform CLI builds and creates for an app, as JSON
 ///   cluster <platform repo> <environment>          what Argo CD's root application deploys (Cluster.fs)
-///   chart <platform repo> <component>              "<repo> <chart or -> <version> <namespace>", for bootstrapping
+///   chart <platform repo> <component>              "<repo> <chart or -> <version> <namespace> <digest>"
 ///   argocd                                         as Argo CD's `platform` plugin: app or cluster, from ARGOCD_ENV_*
 module Platform.Renderer.Program
 
@@ -85,7 +85,7 @@ let private cluster (repo: string) (environmentName: string) =
 let private chart (repo: string) (name: string) =
     let line (c: Cluster.Component) (ch: Cluster.Chart) =
         let chartName = ch.name |> Option.defaultValue "-"
-        $"{ch.repo} {chartName} {ch.version} {App.Name.value c.ns}"
+        $"{ch.repo} {chartName} {ch.version} {App.Name.value c.ns} {ch.digest}"
 
     readComponent repo "none" name
     |> Validation.bind (fun c ->

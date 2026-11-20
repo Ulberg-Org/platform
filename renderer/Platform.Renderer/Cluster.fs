@@ -10,12 +10,14 @@ open Platform.Renderer.App
 open Platform.Renderer.Environment
 open Platform.Renderer.Manifest
 
-/// A Helm chart: from a classic repository (`name` set) or an OCI registry (`repo` is the chart itself).
+/// A Helm chart: from a classic repository (`name` set) or an OCI registry (`repo` is the chart itself), pinned
+/// by the SHA-256 of its package (D65), which CI and the bootstrap check.
 type Chart =
     {
         repo: string
         name: string option
         version: string
+        digest: string
     }
 
 type ComponentDto =
@@ -52,8 +54,15 @@ type RegisteredApp =
     }
 
 module private Field =
+    let private sha256 = System.Text.RegularExpressions.Regex "^sha256:[0-9a-f]{64}$"
+
     let chart (c: Chart) =
-        Parse.notEmpty "chart.version" c.version |> Result.map (fun _ -> c)
+        validation {
+            let! _ = Parse.notEmpty "chart.version" c.version
+            and! _ = Parse.matches sha256 "chart.digest" c.digest
+            return c
+        }
+        |> Result.mapError (String.concat "; ")
 
 let parseComponent (name: string) (valueFiles: string list) (manifestFolders: string list) (yaml: string) =
     Parse.yaml<ComponentDto> yaml

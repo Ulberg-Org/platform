@@ -5,3 +5,4 @@ chart:
   repo: https://open-telemetry.github.io/opentelemetry-helm-charts
   name: opentelemetry-collector
   version: 0.178.3
+  digest: sha256:6c5df6fcb8dfa54b9514eeae08b47f641f32c3ab236d8881a6008599b4f18b12

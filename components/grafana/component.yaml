@@ -4,3 +4,4 @@ chart:
   repo: https://grafana-community.github.io/helm-charts
   name: grafana
   version: 14.4.1
+  digest: sha256:08fcc1f997fa8545c7e6132242c57fba902d103c9d5ebbe42063beafa00ed3df
