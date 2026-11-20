@@ -231,8 +231,11 @@ EOF
 }
 
 sync() {
+  # The renderer first: the plan comes from it, and a changed platform.yaml may need the new one.
+  local renderer
+  renderer=$(build_renderer)
   read_plan
-  if [ "$(build_renderer)" = changed ]; then
+  if [ "$renderer" = changed ]; then
     kind load docker-image "$renderer_image" --name "$cluster" >/dev/null 2>&1
     k -n argocd rollout restart deployment/argocd-repo-server >/dev/null
     k -n argocd rollout status deployment/argocd-repo-server --timeout=5m >/dev/null

@@ -135,9 +135,9 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
                 "imagePullPolicy", text runtime.pullPolicy
                 "ports", items [ fields [ "containerPort", Number s.port ] ]
                 "env", items ([ instanceName; telemetry ] @ database)
-                "startupProbe", startupProbe s.live s.port
-                "livenessProbe", probe s.live s.port
-                "readinessProbe", probe s.ready s.port
+                "startupProbe", startupProbe s.live s.healthPort
+                "livenessProbe", probe s.live s.healthPort
+                "readinessProbe", probe s.ready s.healthPort
                 "resources", resources
                 "securityContext", containerSecurity
             ]

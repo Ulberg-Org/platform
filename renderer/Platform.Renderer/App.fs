@@ -8,7 +8,13 @@ open Platform
 
 type ReplicasDto = { min: int; max: int }
 type ResourcesDto = { cpu: string; memory: string }
-type HealthDto = { live: string; ready: string }
+
+type HealthDto =
+    {
+        port: int
+        live: string
+        ready: string
+    }
 
 type ServiceDto =
     {
@@ -52,6 +58,8 @@ type Service =
         /// The repository in the registry, e.g. "todo/backend".
         image: string
         port: int
+        /// Health checks only (D73): the probes use it; no Service, route or network rule exposes it.
+        healthPort: int
         minReplicas: int
         maxReplicas: int
         cpu: string
@@ -75,6 +83,11 @@ let minimumReplicas = 2
 /// One parser per field of a platform.yaml, so `service` and `parse` below read as a list of fields.
 module private Field =
     let port = Parse.between "port" 1 65535
+
+    /// D73: health has its own port, which nothing but the probes reaches.
+    let healthPort (apiPort: int) (port: int) =
+        Parse.between "health.port" 1 65535 port
+        |> Result.bind (Parse.differs "health.port" "port" apiPort)
 
     let minReplicas (r: ReplicasDto) =
         Parse.atLeast "replicas.min" minimumReplicas r.min
@@ -111,6 +124,7 @@ let private service (databases: Name list) (d: ServiceDto) : Validation<Service,
         and! build = Parse.notEmpty "build" d.build
         and! image = Parse.notEmpty "image" d.image
         and! port = Field.port d.port
+        and! healthPort = Field.healthPort d.port d.health.port
         and! minReplicas = Field.minReplicas d.replicas
         and! maxReplicas = Field.maxReplicas d.replicas
         and! live = Field.path "health.live" d.health.live
@@ -124,6 +138,7 @@ let private service (databases: Name list) (d: ServiceDto) : Validation<Service,
                 build = build
                 image = image
                 port = port
+                healthPort = healthPort
                 minReplicas = minReplicas
                 maxReplicas = maxReplicas
                 cpu = d.resources.cpu

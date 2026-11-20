@@ -55,6 +55,13 @@ let equals (field: string) (expected: string) (s: string) : Result<unit, string>
     else
         Error $"'{field}': '{s}' is not {expected}"
 
+/// `value` must not be the same as the field `otherField`'s value.
+let differs (field: string) (otherField: string) (other: 'a) (value: 'a) : Result<'a, string> =
+    if value <> other then
+        Ok value
+    else
+        Error $"'{field}' must differ from '{otherField}'"
+
 /// Prefixes every error with where it happened, e.g. "groups.app-developers: unknown person 'carl'".
 let within (context: string) (v: Validation<'a, string>) : Validation<'a, string> =
     v |> Validation.mapError (fun e -> $"{context}: {e}")
