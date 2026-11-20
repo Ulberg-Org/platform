@@ -1,0 +1,58 @@
+# The local git server (D61): Argo CD reads each app's rendered manifests from it, as it reads the GitOps repo in
+# Azure. It serves <app repo>/.local/gitops (the workers mount the app repo at /src), read-only, over git://.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitops
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git
+  namespace: gitops
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: git }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: git }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: git
+          image: GIT_SERVER_IMAGE
+          # The repos belong to the developer's user, not this one, so git must be told to trust them.
+          command:
+            - git
+            - -c
+            - safe.directory=*
+            - daemon
+            - --reuseaddr
+            - --export-all
+            - --base-path=/repos
+            - /repos
+          ports: [ { containerPort: 9418 } ]
+          readinessProbe:
+            tcpSocket: { port: 9418 }
+            periodSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ ALL ] }
+          volumeMounts: [ { name: repos, mountPath: /repos, readOnly: true } ]
+      volumes:
+        - name: repos
+          hostPath: { path: /src/.local/gitops }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git
+  namespace: gitops
+spec:
+  selector: { app.kubernetes.io/name: git }
+  ports: [ { port: 9418, targetPort: 9418 } ]

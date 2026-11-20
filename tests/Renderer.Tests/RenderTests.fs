@@ -81,6 +81,8 @@ let tests =
                 let deployment = (rendered "dev")["backend-deployment.yaml"]
                 Expect.stringContains deployment "replicas: 2" "two instances"
                 Expect.stringContains deployment "topologyKey: kubernetes.io/hostname" "spread over nodes"
+                Expect.stringContains deployment "nodeTaintsPolicy: Honor" "only nodes it can run on count"
+                Expect.stringContains deployment "startupProbe:" "a slow start is not a restart"
                 Expect.stringContains deployment "runAsNonRoot: true" "non-root"
                 Expect.stringContains deployment "allowPrivilegeEscalation: false" "no escalation"
                 Expect.stringContains deployment "- ALL" "no capabilities"

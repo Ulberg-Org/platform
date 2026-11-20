@@ -3,10 +3,11 @@
 # platform.yaml with environments/local.yaml (D60, D62).
 #
 #   platform up   <app repo>   a fresh cluster with the platform, the app's database, and the app
+#   platform sync <app repo>   renders the app again (after a platform.yaml change) and waits for Argo CD
 #   platform down <app repo>   removes the cluster and the database
 #
-# Thin slice: kind, Cilium, Envoy Gateway, Postgres outside the cluster, the app with hot reload. ArgoCD and the
-# telemetry stack follow (PLAN Phase 2).
+# kind, Cilium, Envoy Gateway, Argo CD, Postgres outside the cluster, the app with hot reload. The telemetry
+# stack follows (PLAN Phase 2).
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -14,8 +15,9 @@ platform_root=$(cd "$here/.." && pwd)
 # shellcheck source=versions.env
 source "$here/versions.env"
 
-command=${1:?usage: platform up|down <app repo>}
-app_repo=$(cd "${2:?usage: platform up|down <app repo>}" && pwd)
+usage="usage: platform up|sync|down <app repo>"
+command=${1:?$usage}
+app_repo=$(cd "${2:?$usage}" && pwd)
 app_yaml="$app_repo/platform.yaml"
 [ -f "$app_yaml" ] || { echo "No platform.yaml in $app_repo" >&2; exit 1; }
 
@@ -42,6 +44,36 @@ render_local() {
   render "$app_yaml" "$platform_root/environments/local.yaml" dev "$rendered" >/dev/null
   app=$(jq -r .app "$rendered/plan.json")
   cluster=$app
+}
+
+# Argo CD deploys what's in git, as in Azure (D61): the rendered manifests are committed to the app's repo in
+# $state/gitops, which the git server in the cluster serves. Each commit names the app commit it was rendered
+# from.
+publish() {
+  local repo="$state/gitops/$app" source
+  source=$(git -C "$app_repo" rev-parse --short HEAD)$(git -C "$app_repo" diff --quiet HEAD -- || echo "-dirty")
+  mkdir -p "$repo"
+  [ -d "$repo/.git" ] || git -C "$repo" init -q -b main
+  find "$repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+  cp "$rendered"/manifests/* "$repo"/
+  git -C "$repo" add -A
+  git -C "$repo" diff --cached --quiet ||
+    git -C "$repo" -c user.name=platform -c user.email=platform@localhost -c commit.gpgsign=false \
+      commit -q -m "Rendered from $source"
+  revision=$(git -C "$repo" rev-parse HEAD)
+}
+
+# Waits until Argo CD has applied the latest commit and every service has rolled out. (Argo CD's own health can
+# still read Healthy from before the change, so the rollouts are checked directly.)
+synced() {
+  k -n argocd annotate "application/$app" argocd.argoproj.io/refresh=normal --overwrite >/dev/null
+  k -n argocd wait "application/$app" --timeout=5m \
+    --for=jsonpath="{.status.operationState.syncResult.revision}=$revision" >/dev/null
+  k -n argocd wait "application/$app" --for=jsonpath='{.status.operationState.phase}=Succeeded' --timeout=5m >/dev/null
+  for name in $(jq -r '.services[].name' "$rendered/plan.json"); do
+    k -n "$app" rollout status "deployment/$name" --timeout=10m >/dev/null
+  done
+  echo "Argo CD: $app synced at ${revision:0:7}, every service rolled out"
 }
 
 down() {
@@ -109,6 +141,13 @@ EOF
     --set ipam.mode=kubernetes --set operator.replicas=1 --wait --timeout 10m >/dev/null
   k wait --for=condition=Ready nodes --all --timeout=5m >/dev/null
 
+  step "Argo CD $ARGOCD_CHART_VERSION and the git server it reads (GitOps)"
+  h repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
+  h repo update argo >/dev/null
+  h install argocd argo/argo-cd --version "$ARGOCD_CHART_VERSION" -n argocd --create-namespace \
+    -f "$here/values/argocd.yaml" --wait --timeout 10m >/dev/null
+  sed "s|GIT_SERVER_IMAGE|$GIT_SERVER_IMAGE|" "$here/manifests/git-server.yaml" | k apply -f - >/dev/null
+
   step "Envoy Gateway $ENVOY_GATEWAY_CHART_VERSION (the entrance)"
   h install eg oci://docker.io/envoyproxy/gateway-helm --version "$ENVOY_GATEWAY_CHART_VERSION" \
     -n gateway --create-namespace --wait --timeout 10m >/dev/null
@@ -126,18 +165,42 @@ EOF
     echo "$image"
   done
 
-  step "Deploy"
-  k apply -f "$rendered/manifests" >/dev/null
-  for name in $(jq -r '.services[].name' "$rendered/plan.json"); do
-    k -n "$app" rollout status "deployment/$name" --timeout=10m
-  done
+  step "Deploy through Argo CD"
+  publish
+  k -n gitops rollout status deployment/git --timeout=5m >/dev/null
+  k apply -f - >/dev/null <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: $app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git://git.gitops.svc.cluster.local/$app
+    targetRevision: main
+    path: .
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: $app
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+EOF
+  synced
 
   step "Ready"
   echo "App: http://localhost:9875   kubectl: kubectl --kubeconfig $kubeconfig"
 }
 
+sync() {
+  render_local
+  publish
+  synced
+}
+
 case "$command" in
   up) up ;;
+  sync) sync ;;
   down) render_local && down ;;
-  *) echo "usage: platform up|down <app repo>" >&2; exit 2 ;;
+  *) echo "$usage" >&2; exit 2 ;;
 esac

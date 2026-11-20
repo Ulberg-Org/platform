@@ -80,12 +80,15 @@ let private selector (s: Service) = fields [ "matchLabels", nameLabel s ]
 let private inNamespace (ns: string) =
     fields [ "matchLabels", fields [ "k8s:io.kubernetes.pod.namespace", text ns ] ]
 
+let private httpGet (path: string) (port: int) =
+    "httpGet", fields [ "path", text path; "port", Number port ]
+
 let private probe (path: string) (port: int) =
-    fields
-        [
-            "httpGet", fields [ "path", text path; "port", Number port ]
-            "periodSeconds", Number 5
-        ]
+    fields [ httpGet path port; "periodSeconds", Number 5 ]
+
+/// Liveness only starts once the app has started, so a slow start (the SDK compiling, D61) is never a restart.
+let private startupProbe (path: string) (port: int) =
+    fields [ httpGet path port; "periodSeconds", Number 2; "failureThreshold", Number 90 ]
 
 let private variable (name: string) (value: string) =
     fields [ "name", text name; "value", text value ]
@@ -132,6 +135,7 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
                 "imagePullPolicy", text runtime.pullPolicy
                 "ports", items [ fields [ "containerPort", Number s.port ] ]
                 "env", items ([ instanceName; telemetry ] @ database)
+                "startupProbe", startupProbe s.live s.port
                 "livenessProbe", probe s.live s.port
                 "readinessProbe", probe s.ready s.port
                 "resources", resources
@@ -154,6 +158,8 @@ let private deployment (app: App) (environment: Environment) (tag: string) (s: S
                 "maxSkew", Number 1
                 "topologyKey", text "kubernetes.io/hostname"
                 "whenUnsatisfiable", text "DoNotSchedule"
+                // Nodes the service can't run on (tainted: the control plane, AKS's system pool) don't count.
+                "nodeTaintsPolicy", text "Honor"
                 "labelSelector", selector s
             ]
 
