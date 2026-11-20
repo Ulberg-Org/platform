@@ -3,7 +3,9 @@
 # Built from the platform repo's root: docker build -f renderer/Dockerfile .
 # Base images by digest and packages from the lock files (D65).
 
-FROM mcr.microsoft.com/dotnet/sdk:11.0.100-resolute@sha256:65f3c7c6a25a239ab3e6719f2896147e7b68242ff2d8818dd70498bde6ef8bea AS build
+# The build runs on the builder's own architecture (the output is the same .NET code for every one); only the
+# runtime stage is per architecture.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:11.0.100-resolute@sha256:65f3c7c6a25a239ab3e6719f2896147e7b68242ff2d8818dd70498bde6ef8bea AS build
 WORKDIR /src
 # Restore first, from the project files only, so the package layer is reused when only code changes.
 COPY Directory.Build.props global.json ./
