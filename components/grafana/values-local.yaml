@@ -4,5 +4,11 @@
 service:
   type: NodePort
   nodePort: 30876
+# A disk, so Claude's service account (and its token) survives a restart of Grafana; a fresh cluster gets a
+# new one from the platform CLI.
+persistence: { enabled: true, size: 1Gi }
 adminUser: admin
 adminPassword: local-only-admin
+# So the links Grafana makes (and hands to mcp-grafana) point at its local address.
+grafana.ini:
+  server: { root_url: "http://localhost:9876" }
