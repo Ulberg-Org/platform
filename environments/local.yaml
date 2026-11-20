@@ -1,0 +1,16 @@
+# The local environment (D61): a kind cluster on the developer's machine, rendered from the same model as
+# Azure (D60). Only what must differ from the cloud is here.
+name: local
+# Develop: each service runs its Dockerfile's `dev` target with the source mounted (hot reload).
+mode: develop
+# The same minor version as AKS (D61); kind's node image may be an earlier patch.
+kubernetesVersion: "1.37"
+database:
+  # Postgres runs outside the cluster, as in Azure: one container per database on kind's Docker network.
+  # {app} and {database} are filled in by the renderer.
+  host: "{app}-{database}"
+  port: 5432
+telemetryEndpoint: http://collector.observability:4317
+gateway:
+  name: platform
+  namespace: gateway

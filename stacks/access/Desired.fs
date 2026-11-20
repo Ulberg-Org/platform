@@ -3,6 +3,8 @@
 /// resources (functional core, imperative shell).
 module Platform.Access.Desired
 
+open Platform
+
 open FsToolkit.ErrorHandling
 open Platform.Access.People
 

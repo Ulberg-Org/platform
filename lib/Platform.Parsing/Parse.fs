@@ -1,7 +1,7 @@
 /// Small, reusable parsers for turning DTO fields into domain values. Each returns a Result with a
 /// message; callers combine them with FsToolkit's Validation so every problem is reported at once.
 /// See docs/fsharp-style.md.
-module Platform.Access.Parse
+module Platform.Parse
 
 open System
 open System.Text.Json
@@ -31,12 +31,40 @@ let matches (pattern: Regex) (field: string) (s: string) : Result<string, string
     else
         Error $"'{field}': '{s}' is not valid"
 
+let between (field: string) (low: int) (high: int) (n: int) : Result<int, string> =
+    if n >= low && n <= high then
+        Ok n
+    else
+        Error $"'{field}': {n} is not between {low} and {high}"
+
+let atLeast (field: string) (low: int) (n: int) : Result<int, string> =
+    if n >= low then
+        Ok n
+    else
+        Error $"'{field}': {n} is below {low}"
+
+let startsWith (field: string) (prefix: string) (s: string) : Result<string, string> =
+    if s.StartsWith prefix then
+        Ok s
+    else
+        Error $"'{field}': '{s}' must start with {prefix}"
+
+let equals (field: string) (expected: string) (s: string) : Result<unit, string> =
+    if s = expected then
+        Ok()
+    else
+        Error $"'{field}': '{s}' is not {expected}"
+
 /// Prefixes every error with where it happened, e.g. "groups.app-developers: unknown person 'carl'".
 let within (context: string) (v: Validation<'a, string>) : Validation<'a, string> =
     v |> Validation.mapError (fun e -> $"{context}: {e}")
 
+// YAML scalars arrive as strings after the YAML → JSON step, so numbers are also read from strings.
 let private json =
-    JsonSerializerOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)
+    JsonSerializerOptions(
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString
+    )
 
 /// Reads YAML into a DTO: YAML → plain data → JSON → DTO. System.Text.Json maps F# records, options,
 /// lists and maps natively and rejects unknown keys, so a misspelled section is an error, not ignored.

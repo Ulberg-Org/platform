@@ -1,0 +1,51 @@
+# The cluster's entrance (D61): one Envoy Gateway, reached locally at http://localhost:9875 (kind maps that
+# port to the node port below). Apps attach their HTTPRoutes to it; the renderer writes those.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: platform
+  namespace: gateway
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: NodePort
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              # Any node forwards to the proxy, wherever it runs (Envoy Gateway's default, Local, only answers
+              # on nodes that run a proxy; kind maps the port to the control-plane node only).
+              externalTrafficPolicy: Cluster
+              ports:
+                - name: http-80
+                  port: 80
+                  nodePort: 30875
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: platform
+    namespace: gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: platform
+  namespace: gateway
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All

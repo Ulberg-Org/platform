@@ -3,7 +3,6 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Parse.fs" />
     <Compile Include="People.fs" />
     <Compile Include="Desired.fs" />
     <Compile Include="Codeowners.fs" />
@@ -13,6 +12,9 @@
     <Compile Include="ClaudeApp.fs" />
     <Compile Include="GitHub.fs" />
     <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../lib/Platform.Parsing/Platform.Parsing.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Pulumi" Version="3.116.2" />

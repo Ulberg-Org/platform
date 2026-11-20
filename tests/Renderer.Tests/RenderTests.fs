@@ -1,0 +1,124 @@
+module Platform.Renderer.Tests.RenderTests
+
+open System
+open System.IO
+open Expecto
+open Platform.Renderer
+
+let private app =
+    """
+apiVersion: platform/v1
+app: todo
+services:
+  - name: backend
+    build: backend
+    image: todo/backend
+    port: 8080
+    replicas: { min: 2, max: 4 }
+    resources: { cpu: 250m, memory: 256Mi }
+    health: { live: /health/live, ready: /health/ready }
+    routes: [ /, /api ]
+    database: todo
+  - name: worker
+    build: worker
+    image: todo/worker
+    port: 8080
+    replicas: { min: 2, max: 2 }
+    resources: { cpu: 100m, memory: 128Mi }
+    health: { live: /live, ready: /ready }
+databases:
+  todo: { engine: postgres }
+"""
+
+let private ok r =
+    r |> Result.defaultWith (failtestf "expected Ok, got %A")
+
+let private environment name =
+    File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "environments", $"{name}.yaml"))
+    |> Environment.parse
+    |> ok
+
+/// All manifests for `env`, as YAML text by file name.
+let private rendered env =
+    Render.render (App.parse app |> ok) (environment env) "55fb0bd"
+    |> List.map (fun m -> m.file, Manifest.toYaml m.content)
+    |> Map.ofList
+
+[<Tests>]
+let tests =
+    testList
+        "renderer"
+        [
+            test "local and dev differ only where the environment says so: image, hot reload, limits" {
+                let local = rendered "local"
+                let dev = rendered "dev"
+                Expect.equal (Map.keys local |> List.ofSeq) (Map.keys dev |> List.ofSeq) "the same files"
+
+                Expect.stringContains local["backend-deployment.yaml"] "image: todo/backend:dev" "local builds"
+                Expect.stringContains local["backend-deployment.yaml"] "mountPath: /src" "source mounted"
+                Expect.stringContains local["backend-deployment.yaml"] "readOnlyRootFilesystem: false" "SDK writes"
+
+                Expect.stringContains
+                    dev["backend-deployment.yaml"]
+                    "image: crplatform21784576.azurecr.io/todo/backend:55fb0bd"
+                    "the commit's signed image"
+
+                Expect.stringContains dev["backend-deployment.yaml"] "readOnlyRootFilesystem: true" "read-only"
+                Expect.isFalse (dev["backend-deployment.yaml"].Contains "hostPath") "no source mount in the cloud"
+
+                // Everything that isn't the environment's business is identical.
+                for file in
+                    [
+                        "backend-service.yaml"
+                        "backend-route.yaml"
+                        "network-deny-all.yaml"
+                        "namespace.yaml"
+                    ] do
+                    Expect.equal local[file] dev[file] file
+            }
+
+            test "every service runs at least two instances, on different nodes, hardened (D57)" {
+                let deployment = (rendered "dev")["backend-deployment.yaml"]
+                Expect.stringContains deployment "replicas: 2" "two instances"
+                Expect.stringContains deployment "topologyKey: kubernetes.io/hostname" "spread over nodes"
+                Expect.stringContains deployment "runAsNonRoot: true" "non-root"
+                Expect.stringContains deployment "allowPrivilegeEscalation: false" "no escalation"
+                Expect.stringContains deployment "- ALL" "no capabilities"
+            }
+
+            test "deny by default; only a service that declares the database may reach it, by name" {
+                let local = rendered "local"
+                Expect.stringContains local["network-deny-all.yaml"] "podSelector: {}" "every pod"
+                Expect.stringContains local["backend-network.yaml"] "matchName: todo-todo" "the database"
+                Expect.isFalse (local["worker-network.yaml"].Contains "toFQDNs") "the worker has no database"
+                let dev = rendered "dev"
+                Expect.stringContains dev["backend-network.yaml"] "todo-todo-dev.postgres.database.azure.com" "Azure's"
+            }
+
+            test "routes go through the gateway; a service without routes gets none" {
+                let local = rendered "local"
+                Expect.stringContains local["backend-route.yaml"] "value: /api" "/api"
+                Expect.stringContains local["backend-route.yaml"] "namespace: gateway" "the gateway"
+                Expect.isFalse (local.ContainsKey "worker-route.yaml") "no route"
+            }
+
+            test "a platform.yaml is refused with every problem at once" {
+                let broken =
+                    app
+                        .Replace("min: 2, max: 4", "min: 1, max: 4")
+                        .Replace("database: todo", "database: other")
+                        .Replace("[ /, /api ]", "[ api ]")
+
+                match App.parse broken with
+                | Ok _ -> failtest "expected errors"
+                | Error errors ->
+                    let all = String.concat "\n" errors
+                    Expect.stringContains all "below 2 (D57)" "min replicas"
+                    Expect.stringContains all "'other' is not declared" "unknown database"
+                    Expect.stringContains all "must start with /" "route"
+            }
+
+            test "local and dev pin the same Kubernetes minor version (D61)" {
+                Expect.equal (environment "local").kubernetesVersion (environment "dev").kubernetesVersion "1.37"
+            }
+        ]

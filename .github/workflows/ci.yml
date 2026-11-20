@@ -60,12 +60,14 @@ jobs:
       - name: Style guide matches todo (same owner)
         run: curl -sSfL https://raw.githubusercontent.com/${{ github.repository_owner }}/todo/main/docs/fsharp-style.md | diff -u - docs/fsharp-style.md
       - name: Format (Fantomas)
-        run: dotnet fantomas --check stacks tests
+        run: dotnet fantomas --check stacks tests lib renderer
       - name: Build (warnings are errors)
         run: dotnet build platform.slnx -c Release
       - name: Test (includes access/people.yaml and CODEOWNERS)
         run: dotnet run --project tests/Access.Tests -c Release --no-build
       - name: Test the shared stack
         run: dotnet run --project tests/Shared.Tests -c Release --no-build
+      - name: Test the renderer (D60, D62)
+        run: dotnet run --project tests/Renderer.Tests -c Release --no-build
       - name: Workflows follow the stack order (D53)
         run: .github/scripts/check_stack_order.sh

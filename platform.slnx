@@ -1,4 +1,10 @@
 <Solution>
+  <Folder Name="/lib/">
+    <Project Path="lib/Platform.Parsing/Platform.Parsing.fsproj" />
+  </Folder>
+  <Folder Name="/renderer/">
+    <Project Path="renderer/Platform.Renderer/Platform.Renderer.fsproj" />
+  </Folder>
   <Folder Name="/stacks/" />
   <Folder Name="/stacks/access/">
     <Project Path="stacks/access/Access.fsproj" />
@@ -9,5 +15,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/Access.Tests/Access.Tests.fsproj" />
     <Project Path="tests/Shared.Tests/Shared.Tests.fsproj" />
+    <Project Path="tests/Renderer.Tests/Renderer.Tests.fsproj" />
   </Folder>
 </Solution>
