@@ -36,6 +36,9 @@ platform_snapshot="$state/gitops/platform"
 k() { kubectl --kubeconfig "$cli_kubeconfig" "$@"; }
 h() { helm --kubeconfig "$cli_kubeconfig" "$@"; }
 step() { printf '\n== %s\n' "$*"; }
+# Image builds download packages too: the machine's proxy, if it has one, for their RUN steps (Docker leaves these
+# predefined arguments out of the image's history).
+proxy_args=(--build-arg HTTP_PROXY --build-arg HTTPS_PROXY --build-arg NO_PROXY)
 # Git refuses a repository another user owns, and the checkouts are the developer's while the CLI's image runs as
 # root (Docker Desktop hides that by showing shared files as root's; a Linux VM doesn't). Trusted: only the two repos
 # this run was given (its own snapshots are root's).
@@ -61,7 +64,7 @@ build_renderer() {
       >/dev/null 2>&1 || { echo "The renderer image $RENDERER_IMAGE isn't signed by the platform's release" >&2; exit 1; }
     docker pull -q "$RENDERER_IMAGE" >/dev/null && docker tag "$RENDERER_IMAGE" "$renderer_image"
   else
-    docker build -q --provenance=false -f "$platform_root/renderer/Dockerfile" -t "$renderer_image" "$platform_root" >/dev/null
+    docker build -q --provenance=false "${proxy_args[@]}" -f "$platform_root/renderer/Dockerfile" -t "$renderer_image" "$platform_root" >/dev/null
   fi
   after=$(docker image inspect -f '{{.Id}}' "$renderer_image")
   [ "$before" = "$after" ] || echo changed
@@ -492,7 +495,7 @@ EOF
 service_images() {
   local name image build loaded
   while read -r name image build; do
-    docker build -q --provenance=false --target dev -t "$image" "$app_repo/$build" >/dev/null
+    docker build -q --provenance=false "${proxy_args[@]}" --target dev -t "$image" "$app_repo/$build" >/dev/null
     # kind loads only onto nodes that don't have this exact image, and says so.
     loaded=$(kind load docker-image "$image" --name "$cluster" 2>&1) || { echo "$loaded" >&2; exit 1; }
     if [[ $loaded == *"not yet present"* ]]; then echo "$name"; fi
