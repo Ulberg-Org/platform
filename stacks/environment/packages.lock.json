@@ -63,10 +63,25 @@
           "Pulumi": "3.116.2"
         }
       },
+      "Pulumi.Kubernetes": {
+        "type": "Direct",
+        "requested": "[4.34.3, )",
+        "resolved": "4.34.3",
+        "contentHash": "fIjkZ8G5q4N6VnqWOCUfATVXD4uPxrfs5sfgRxvz+xEl8gy+2YIY4PtxNTZYz+gpdzeLditlcl4EJe3zsq3uog==",
+        "dependencies": {
+          "Glob": "1.1.5",
+          "Pulumi": "3.116.2"
+        }
+      },
       "Ben.Demystifier": {
         "type": "Transitive",
         "resolved": "0.4.1",
         "contentHash": "axFeEMfmEORy3ipAzOXG/lE+KcNptRbei3F0C4kQCdeiQtW+qJW90K5iIovITGrdLt8AjhNCwk5qLSX9/rFpoA=="
+      },
+      "Glob": {
+        "type": "Transitive",
+        "resolved": "1.1.5",
+        "contentHash": "N1kGneRrxfXn933JAIB61LCGPu+WEbr+qObpGqNNw125nQbuGusoBLe6skj7D0Zyjzhmrc2IdEx32ijYEdGdEA=="
       },
       "Google.Protobuf": {
         "type": "Transitive",

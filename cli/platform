@@ -36,9 +36,10 @@ platform_snapshot="$state/gitops/platform"
 k() { kubectl --kubeconfig "$cli_kubeconfig" "$@"; }
 h() { helm --kubeconfig "$cli_kubeconfig" "$@"; }
 step() { printf '\n== %s\n' "$*"; }
-# A file from cli/templates with its @name@ placeholders filled in: template <file> name=value...
+# A file of the platform repo (cli/templates, database) with its @name@ placeholders filled in:
+# template <path from the repo's root> name=value...
 template() {
-  local file="$here/templates/$1" fill=() pair
+  local file="$platform_root/$1" fill=() pair
   for pair in "${@:2}"; do fill+=(-e "s|@${pair%%=*}@|${pair#*=}|g"); done
   sed "${fill[@]}" "$file"
 }
@@ -47,8 +48,12 @@ template() {
 proxy_args=(--build-arg HTTP_PROXY --build-arg HTTPS_PROXY --build-arg NO_PROXY)
 # Git refuses a repository another user owns, and the checkouts are the developer's while the CLI's image runs as
 # root (Docker Desktop hides that by showing shared files as root's; a Linux VM doesn't). Trusted: only the two repos
-# this run was given (its own snapshots are root's).
-git() { command git -c safe.directory="$app_repo" -c safe.directory="$platform_root" "$@"; }
+# this run was given, and its own two snapshots (whoever ran the CLI before may own them: from a checkout, it runs
+# as the developer).
+git() {
+  command git -c safe.directory="$app_repo" -c safe.directory="$platform_root" \
+    -c safe.directory="$state/gitops/platform" -c safe.directory="$state/gitops/${app:-}" "$@"
+}
 
 # The renderer, from its image (the same one Argo CD's plugin runs), reading the platform's snapshot and the app
 # repo read-only. Both are paths on the host, which the host's Docker can mount wherever the CLI runs.
@@ -309,7 +314,9 @@ database() { # name host
   until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
   sleep 2 # pg_isready answers before the init process has restarted the server
   until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
-  template database.sql db="$db" | docker exec -i "$host" psql -q -U postgres -d "$db" -v ON_ERROR_STOP=1
+  # The roles, the same as in Azure (database/roles.sql, D85), and how they sign in locally.
+  { template database/roles.sql db="$db" && template database/local.sql db="$db"; } |
+    docker exec -i "$host" psql -q -U postgres -d "$db" -v ON_ERROR_STOP=1
   # The app's connection, as a Secret the rendered Deployment reads (Render.fs). Argo CD later adopts the
   # namespace (Cluster.fs), and leaves the Secret alone: it's not in git.
   k create namespace "$app" --dry-run=client -o yaml | k apply -f - >/dev/null
@@ -338,7 +345,7 @@ egress_proxy() {
     k -n "$ns" create configmap platform-proxy --from-literal=HTTPS_PROXY="$HTTPS_PROXY" \
       --from-literal=NO_PROXY="${NO_PROXY:-}" --dry-run=client -o yaml | k apply -f - >/dev/null
     # Their network rules allow the internet on 443 only; the proxy listens elsewhere.
-    template proxy-policy.yaml namespace="$ns" ip="${address%:*}" port="${address##*:}" | k apply -f - >/dev/null
+    template cli/templates/proxy-policy.yaml namespace="$ns" ip="${address%:*}" port="${address##*:}" | k apply -f - >/dev/null
   done
 }
 
@@ -353,7 +360,7 @@ up() {
   down
   # The Kubernetes API's audit policy (D71), mounted into the control-plane node.
   mkdir -p "$state/audit" && cp "$here/audit-policy.yaml" "$state/audit/policy.yaml"
-  template kind.yaml node_image="$KIND_NODE_IMAGE" state="$state" app_repo="$app_repo" >"$state/kind.yaml"
+  template cli/templates/kind.yaml node_image="$KIND_NODE_IMAGE" state="$state" app_repo="$app_repo" >"$state/kind.yaml"
   kind create cluster --name "$cluster" --config "$state/kind.yaml" --kubeconfig "$kubeconfig" --wait 0s
   join_kind
 

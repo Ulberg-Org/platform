@@ -72,3 +72,49 @@ let nameTests =
                 Expect.equal n.databaseZone "dev.private.postgres.database.azure.com" "private DNS zone"
             }
         ]
+
+[<Tests>]
+let databaseTests =
+    testList
+        "environment: an app's database (D69, D75, D85)"
+        [
+            let todo =
+                {
+                    name = "todo"
+                    app = "todo"
+                    service = "backend"
+                }
+
+            test "the backend's identity and service account follow the app, the service and the environment" {
+                Expect.equal (AppDatabase.identity "dev" todo) "id-todo-backend-dev" "identity"
+                Expect.equal (AppDatabase.serviceAccount todo) "system:serviceaccount:todo:backend" "subject"
+            }
+
+            test "the roles are the shared SQL, then Azure's, filled in for the app" {
+                let sql =
+                    AppDatabase.rolesSql "CREATE ROLE @db@_app NOLOGIN;" "GRANT @db@_app TO \"@backend@\";" "dev" todo
+
+                Expect.equal sql "CREATE ROLE todo_app NOLOGIN;\nGRANT todo_app TO \"id-todo-backend-dev\";" "filled"
+            }
+        ]
+
+[<Tests>]
+let ciTests =
+    testList
+        "environment: CI in the cluster"
+        [
+            test "the apply identity administers the cluster (it runs the bootstrap); the preview identity only reads" {
+                Expect.equal (Map.find "apply" (Map.ofList Cluster.ciAccess)) [ ClusterUser; RbacClusterAdmin ] "apply"
+                Expect.equal (Map.find "preview" (Map.ofList Cluster.ciAccess)) [ ClusterUser; RbacReader ] "preview"
+            }
+
+            test "CI's kubeconfig signs in through kubelogin as the az session, and holds no credential" {
+                let config = Cluster.kubeconfig "aks-dev.hcp.example" "Q0E="
+
+                Expect.stringContains config "server: https://aks-dev.hcp.example:443" "server"
+                Expect.stringContains config "certificate-authority-data: Q0E=" "CA"
+                Expect.stringContains config "command: kubelogin" "kubelogin"
+                Expect.stringContains config "- azurecli" "as the az session"
+                Expect.isFalse (config.Contains "token:") "no token"
+            }
+        ]
