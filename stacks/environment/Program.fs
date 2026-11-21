@@ -12,9 +12,15 @@ let private run () =
     // 1. Input
     let environment = Deployment.Instance.StackName
     let config = Config "environment"
-    let azure = Config "azure-native"
-    let subscriptionId = azure.Require "subscriptionId"
-    let tenantId = azure.Require "tenantId"
+    // Which tenant and subscription: CI's environment (ARM_TENANT_ID, ARM_SUBSCRIPTION_ID, from the repo's
+    // variables), which Azure's provider reads too; not repeated in the stack's config.
+    let required name =
+        System.Environment.GetEnvironmentVariable name
+        |> Option.ofObj
+        |> Option.defaultWith (fun () -> raise (RunException $"environment: {name} isn't set"))
+
+    let subscriptionId = required "ARM_SUBSCRIPTION_ID"
+    let tenantId = required "ARM_TENANT_ID"
     let subscription = $"/subscriptions/{subscriptionId}"
     let names = Names.forEnvironment (config.Require "namePrefix") environment
     let sharedGroupName = config.Require "sharedGroup"
@@ -41,8 +47,18 @@ let private run () =
         raise (RunException $"environment: {List.length problems} problem(s), see the errors above")
     | Ok network ->
         // 3. Action
+        // `started` tells `destroy` the environment's age (D45); set once, so starting it again doesn't extend it.
+        let started = System.DateTime.UtcNow.ToString "yyyy-MM-ddTHH:mm:ssZ"
+
         let group =
-            Resources.ResourceGroup(names.group, Resources.ResourceGroupArgs(ResourceGroupName = names.group))
+            Resources.ResourceGroup(
+                names.group,
+                Resources.ResourceGroupArgs(
+                    ResourceGroupName = names.group,
+                    Tags = inputMap [ "started", input started ]
+                ),
+                CustomResourceOptions(IgnoreChanges = ResizeArray [ "tags" ])
+            )
 
         // The network (D86): the database accepts only Postgres from the nodes; the nodes, from the internet,
         // only the gateway's ports to its static address. Everything else inbound is Azure's default deny.

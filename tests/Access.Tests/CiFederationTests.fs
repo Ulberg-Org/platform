@@ -16,12 +16,14 @@ let tests =
     testList
         "CI federated credentials"
         [
-            test "the apply identity trusts only approved runs in the dev environment" {
+            test "the apply identity trusts only approved runs in dev, and teardowns" {
                 Expect.equal
                     (subjectsOf ApplyIdentity)
                     [
                         "github", "repo:Owner@1/platform@9:environment:dev"
+                        "github-teardown", "repo:Owner@1/platform@9:environment:teardown"
                         "github-org", "repo:Org@2/platform@9:environment:dev"
+                        "github-org-teardown", "repo:Org@2/platform@9:environment:teardown"
                     ]
                     "apply subjects"
             }

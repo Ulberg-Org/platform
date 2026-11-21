@@ -1,6 +1,5 @@
 config:
-  azure-native:subscriptionId: 21784576-1957-4336-89d8-a6ab6b571930
-  azure-native:tenantId: e17ac17e-d8cd-4280-a4e5-94ad2bb85549
+  # The tenant and subscription come from CI's environment (ARM_TENANT_ID, ARM_SUBSCRIPTION_ID).
   azure-native:location: swedencentral
   # What shared keeps for every environment (D45, D89): its address, and the registry the cluster pulls from.
   environment:sharedGroup: rg-platform-shared

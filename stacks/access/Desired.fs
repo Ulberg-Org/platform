@@ -453,13 +453,13 @@ type OrgRole =
 /// Membership in the GitHub organization. Only the bootstrap owner is an admin.
 type OrgMembership = { person: Person; role: OrgRole }
 
-/// An environment that already exists in GitHub. `branchPolicyId` is its existing `main` branch
-/// policy, which is imported rather than created. `reviewers`: the team that approves its runs.
+/// A GitHub environment: runs from `main` only. `branchPolicyId`: the id of the `main` branch policy of one
+/// that already existed, which is imported rather than created. `reviewers`: the team that approves its runs.
 type Environment =
     {
         repo: RepoName
         name: string
-        branchPolicyId: int
+        branchPolicyId: int option
         reviewers: string option
     }
 
@@ -494,12 +494,12 @@ module CiIdentity =
         | ApplyIdentity -> "id-platform-apply"
         | PreviewIdentity -> "id-platform-preview"
 
-    /// Credential-name suffix and subject claim: approved apply runs only (the `dev` environment);
-    /// previews from pull requests and from main.
+    /// Credential-name suffix, subject claim, and whether bootstrap.sh made it: approved apply runs (the `dev`
+    /// environment) and teardowns (the `teardown` environment, D45); previews from pull requests and from main.
     let claims =
         function
-        | ApplyIdentity -> [ "", "environment:dev" ]
-        | PreviewIdentity -> [ "", "pull_request"; "-main", "ref:refs/heads/main" ]
+        | ApplyIdentity -> [ "", "environment:dev", true; "-teardown", "environment:teardown", false ]
+        | PreviewIdentity -> [ "", "pull_request", true; "-main", "ref:refs/heads/main", true ]
 
 /// A repository prefix that CI tokens may carry (e.g. "repo:Ulberg-Org@358725408/platform@1450696781"),
 /// and the name its credentials get. `existing`: the credentials already exist (`madeBy: bootstrap` in the
@@ -568,12 +568,13 @@ let federatedCredentials (trusts: CiTrust list) : FederatedCredential list =
     [
         for t in trusts do
             for identity in [ ApplyIdentity; PreviewIdentity ] do
-                for suffix, claim in CiIdentity.claims identity ->
+                for suffix, claim, byBootstrap in CiIdentity.claims identity ->
                     {
                         identity = identity
                         name = t.name + suffix
                         subject = $"{t.repoPrefix}:{claim}"
-                        existing = t.existing
+                        // Imported only if bootstrap.sh made both the trust and this claim.
+                        existing = t.existing && byBootstrap
                     }
     ]
 
@@ -793,13 +794,20 @@ let plan
                         {
                             repo = RepoName.platform
                             name = "dev"
-                            branchPolicyId = 65981291
+                            branchPolicyId = Some 65981291
                             reviewers = Some(Team.leadsOf RepoName.platform)
+                        }
+                        // Tearing environments down needs no approval (D45): only `destroy` runs in it.
+                        {
+                            repo = RepoName.platform
+                            name = "teardown"
+                            branchPolicyId = None
+                            reviewers = None
                         }
                         {
                             repo = todo
                             name = "release"
-                            branchPolicyId = 65981293
+                            branchPolicyId = Some 65981293
                             reviewers = None
                         }
                     ]

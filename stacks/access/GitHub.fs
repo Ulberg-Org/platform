@@ -130,8 +130,8 @@ let private orgMembership (m: OrgMembership) =
         CustomResourceOptions(RetainOnDelete = true)
     )
 
-/// An existing environment, managed in place (PUT is an upsert). Protected, because deleting
-/// an environment also deletes its secrets.
+/// An environment, managed in place (PUT is an upsert); one that existed before keeps its imported branch
+/// policy. Protected, because deleting an environment also deletes its secrets.
 let private environment (teams: Map<string, Pulumi.Github.Team>) (e: Environment) =
     let repo = RepoName.value e.repo
 
@@ -160,16 +160,22 @@ let private environment (teams: Map<string, Pulumi.Github.Team>) (e: Environment
             CustomResourceOptions(Protect = true, RetainOnDelete = true)
         )
 
+    let options =
+        CustomResourceOptions(
+            ImportId =
+                (e.branchPolicyId
+                 |> Option.map (fun id -> $"{repo}:{e.name}:{id}")
+                 |> Option.toObj),
+            DependsOn = InputList.op_Implicit (env :> Resource),
+            Protect = true,
+            RetainOnDelete = true
+        )
+
     let branchPolicy =
         RepositoryEnvironmentDeploymentPolicy(
             $"{repo}-{e.name}-main",
             RepositoryEnvironmentDeploymentPolicyArgs(Repository = repo, Environment = e.name, BranchPattern = "main"),
-            CustomResourceOptions(
-                ImportId = $"{repo}:{e.name}:{e.branchPolicyId}",
-                DependsOn = InputList.op_Implicit (env :> Resource),
-                Protect = true,
-                RetainOnDelete = true
-            )
+            options
         )
 
     env, branchPolicy

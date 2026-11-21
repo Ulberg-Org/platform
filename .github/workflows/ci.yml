@@ -74,6 +74,8 @@ jobs:
         run: dotnet run --project tests/Shared.Tests -c Release --no-build
       - name: Test the environment stack
         run: dotnet run --project tests/Environment.Tests -c Release --no-build
+      - name: Test which environments destroy removes (D45)
+        run: .github/scripts/test_due_environments.sh
       - name: Test the renderer (D60, D62)
         run: dotnet run --project tests/Renderer.Tests -c Release --no-build
       - name: Platform charts are the packages their digests pin (D65)
