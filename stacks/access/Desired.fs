@@ -412,6 +412,8 @@ let private requiredChecks =
                 "prompt log"
                 "dotnet (format, build, test)"
                 "pulumi preview"
+                // Run from main's copy, so a pull request can't change it (guard.yml).
+                "workflow guard"
             ]
             "todo",
             [
