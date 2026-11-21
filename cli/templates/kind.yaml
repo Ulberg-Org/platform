@@ -1,0 +1,37 @@
+# kind's cluster (D61), filled in by the platform CLI (its template function).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true # Cilium instead, which enforces network rules
+  apiServerPort: 9877 # fixed, next to the app and Grafana, so Claude's sandbox can be allowed exactly it (D80)
+nodes:
+  - role: control-plane
+    image: @node_image@
+    # The API server writes an audit log, which the agent collector on this node reads (D71).
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            - { name: audit-policy-file, value: /etc/kubernetes/audit/policy.yaml }
+            - { name: audit-log-path, value: /var/log/kubernetes/audit/audit.log }
+            - { name: audit-log-maxsize, value: "50" }
+            - { name: audit-log-maxbackup, value: "2" }
+          # Footprint: a memory cap Go honours, so the API server gives memory back (it's the largest process).
+          extraEnvs:
+            - { name: GOMEMLIMIT, value: 700MiB }
+          extraVolumes:
+            - { name: audit-policy, hostPath: /etc/kubernetes/audit, mountPath: /etc/kubernetes/audit, readOnly: true, pathType: Directory }
+            - { name: audit-log, hostPath: /var/log/kubernetes/audit, mountPath: /var/log/kubernetes/audit, pathType: DirectoryOrCreate }
+    extraMounts: [ { hostPath: "@state@/audit", containerPath: /etc/kubernetes/audit, readOnly: true } ]
+    extraPortMappings:
+      - { containerPort: 30875, hostPort: 9875, listenAddress: 127.0.0.1 } # the app, through the gateway
+      - { containerPort: 30876, hostPort: 9876, listenAddress: 127.0.0.1 } # Grafana
+  # Two workers, so an app's two instances sit on different nodes (D57); the app's repo is mounted on both
+  # for hot reload (D61) and for the git server's snapshots (D68).
+  - role: worker
+    image: @node_image@
+    extraMounts: [ { hostPath: "@app_repo@", containerPath: /src, readOnly: true } ]
+  - role: worker
+    image: @node_image@
+    extraMounts: [ { hostPath: "@app_repo@", containerPath: /src, readOnly: true } ]

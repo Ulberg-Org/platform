@@ -1,0 +1,22 @@
+# Argo CD's root application (D67): the platform repo's snapshot, rendered by the platform plugin.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git://git.gitops.svc.cluster.local/platform
+    targetRevision: main
+    path: .
+    plugin:
+      name: platform
+      env:
+        - { name: MODE, value: cluster }
+        - { name: ENVIRONMENT, value: local }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }

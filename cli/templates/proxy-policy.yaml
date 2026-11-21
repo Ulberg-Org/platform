@@ -1,0 +1,10 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: platform-proxy, namespace: @namespace@ }
+spec:
+  endpointSelector: {}
+  # Only adds the proxy: on its own, a first policy would deny the namespace everything else.
+  enableDefaultDeny: { egress: false, ingress: false }
+  egress:
+    - toCIDR: [ @ip@/32 ]
+      toPorts: [ { ports: [ { port: "@port@", protocol: TCP } ] } ]

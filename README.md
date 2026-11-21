@@ -10,14 +10,23 @@ See `AGENTS.md` for the working rules and `Ulberg-Org/todo/PLAN.md` for the over
 
 ## Layout
 
+How it fits together: an app describes itself in `platform.yaml`. The **renderer** turns that, plus an
+**environment**, into Kubernetes manifests, and **Argo CD** deploys them together with the platform's
+**components**: locally, a kind cluster that the **CLI** starts; in Azure, AKS, which the Pulumi **stacks** create
+(applied only by CI). Claude works in a **sandbox** of its own.
+
 | Path | What |
 |---|---|
-| `access/people.yaml` | People, groups and repo leads. The only place access is defined |
-| `bootstrap/` | One-time setup Pulumi needs before it can run (state, CI identities). See its README |
-| `cli/` | The platform CLI (`platform up / sync / test / down`) and its image (D63) |
-| `components/`, `environments/`, `apps/` | What Argo CD deploys per environment, and the apps it runs (D67, D68) |
-| `renderer/` | `platform.yaml` + an environment → Kubernetes manifests; Argo CD's plugin (D60, D68) |
-| `stacks/access/` | Pulumi stack `main`: Entra groups (`platform-read` ⊃ `platform-write` ⊃ `platform-admin`), PIM for Groups, Conditional Access, Azure Reader, GitHub rulesets and environments, CODEOWNERS check |
+| `access/people.yaml` | People, groups, repo leads and Claude agents. The only place access is defined |
+| `renderer/`, `lib/` | `platform.yaml` + an environment → Kubernetes manifests; Argo CD's plugin (D60, D68). `lib/` holds the shared parsing (parse, don't validate) |
+| `components/` | What the platform runs in every cluster (Argo CD, the gateway, the telemetry stack, network baseline), one folder each: the chart's pin, values, local values |
+| `environments/`, `apps/` | Each environment's settings, and the apps Argo CD runs there (D67) |
+| `cli/` | The platform CLI (`platform up / sync / test / down`), its image (D63), and the files it fills in (`cli/templates/`) |
+| `stacks/`, `bootstrap/` | Pulumi stacks for Azure, Entra and GitHub (`stacks/access/`: groups, PIM, Conditional Access, rulesets, environments), and the one-time setup Pulumi needs first |
+| `sandbox/` | Claude's sandbox (D81): a Lima VM per profile, confined to an allowlisting proxy; `sandbox/test` checks it holds |
+| `scripts/` | Claude's GitHub identity (`claude-github-token.sh`, `claude-push.sh`) and the agent's smoke test |
+| `.github/` | CI (`ci.yml`), Pulumi preview and apply (`pulumi.yml`), CLI releases (`release.yml`), and the checks they run |
+| `docs/` | The F# style, and the reviews of dependencies we use without an official source |
 | `tests/` | Unit tests (Expecto) |
 
 ## Tools

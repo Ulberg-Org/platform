@@ -1,0 +1,8 @@
+{
+  "GIT_CONFIG_COUNT": "3",
+  "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf", "GIT_CONFIG_VALUE_0": "git@github.com:",
+  "GIT_CONFIG_KEY_1": "credential.https://github.com.helper", "GIT_CONFIG_VALUE_1": "",
+  "GIT_CONFIG_KEY_2": "credential.https://github.com.helper", "GIT_CONFIG_VALUE_2": "!gh auth git-credential",
+  "GIT_COMMITTER_NAME": "ulberg-claude[bot]",
+  "GIT_COMMITTER_EMAIL": "358816865+ulberg-claude[bot]@users.noreply.github.com"
+}

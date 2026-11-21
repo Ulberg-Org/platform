@@ -69,15 +69,8 @@ token=$("$here/github-token")
 printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n    user: ulberg-claude[bot]\n' "$token" |
   vm 'mkdir -p ~/.config/gh-claude && cat >~/.config/gh-claude/hosts.yml && chmod 600 ~/.config/gh-claude/hosts.yml'
 vm 'mkdir -p ~/.claude && f=~/.claude/settings.json && { [ -s $f ] || echo "{}" >$f; } &&
-  jq --arg home "$HOME" ".env += {
-    GH_CONFIG_DIR: (\$home + \"/.config/gh-claude\"),
-    GIT_CONFIG_COUNT: \"3\",
-    GIT_CONFIG_KEY_0: \"url.https://github.com/.insteadOf\", GIT_CONFIG_VALUE_0: \"git@github.com:\",
-    GIT_CONFIG_KEY_1: \"credential.https://github.com.helper\", GIT_CONFIG_VALUE_1: \"\",
-    GIT_CONFIG_KEY_2: \"credential.https://github.com.helper\", GIT_CONFIG_VALUE_2: \"!gh auth git-credential\",
-    GIT_COMMITTER_NAME: \"ulberg-claude[bot]\",
-    GIT_COMMITTER_EMAIL: \"358816865+ulberg-claude[bot]@users.noreply.github.com\"
-  }" $f >$f.new && mv $f.new $f'
+  jq --arg profile "$HOME/.config/gh-claude" --slurpfile env /dev/stdin \
+    ".env += \$env[0] + {GH_CONFIG_DIR: \$profile}" $f >$f.new && mv $f.new $f' <"$here/claude-env.json"
 # The platform repo next to the app's too, as on the developer's machine: Claude publishes with its
 # scripts/claude-push.sh.
 for repo in "${repos[@]}" platform; do
