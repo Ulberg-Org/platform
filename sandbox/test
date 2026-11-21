@@ -23,7 +23,7 @@ check "the proxy refuses hosts not on the allowlist" 'curl -sf -m 8 -o /dev/null
 check "the developer's Mac isn't reachable directly" "$direct curl -s -m 5 -o /dev/null http://host.lima.internal:9876"
 check "nor through the proxy" 'curl -sf -m 5 -o /dev/null http://host.lima.internal:9876'
 check "nor the LAN through the proxy" "curl -sf -m 5 -o /dev/null http://$lan"
-check "GitHub only as the app, never a person's account" 'gh api user'
+check "GitHub only as the app, never a person's account" 'GH_CONFIG_DIR=~/.config/gh-claude gh api user'
 # From the host: the platform profile is refused to an agent whose developer isn't an infra developer (D77),
 # against a copy of access/people.yaml without any.
 fixture=$(mktemp -d); mkdir "$fixture/access"; cp -R "$here" "$fixture/sandbox"
