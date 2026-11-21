@@ -14,6 +14,9 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 platform_root=$(cd "$here/.." && pwd)
+# Everything here acts as Claude, never as the developer, also from their own terminal: Claude's agent profile
+# for az (D41) and its own gh profile (D52), set up once as in AGENTS.md §4.
+export AZURE_CONFIG_DIR="$HOME/.azure-agent" GH_CONFIG_DIR="$HOME/.config/gh-claude"
 people="$platform_root/access/people.yaml"
 usage="usage: sandbox <app repo> | sandbox platform [--app <repo>]"
 target=${1:?$usage}

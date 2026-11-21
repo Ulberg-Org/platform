@@ -3,5 +3,7 @@
 # copies it into Claude's VM every 45 minutes (D81: the token lives in the VM, for at most an hour).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+# As Claude, also from the developer's terminal (see sandbox/sandbox).
+export AZURE_CONFIG_DIR="$HOME/.azure-agent" GH_CONFIG_DIR="$HOME/.config/gh-claude"
 "$here/../scripts/claude-github-token.sh" >/dev/null
-GH_CONFIG_DIR="$HOME/.config/gh-claude" gh auth token
+gh auth token
