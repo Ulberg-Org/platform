@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# A stand-in for `pulumi cancel` in test_release_stale_lock.sh; $CASE picks the answer.
+case "$CASE" in
+  locked) echo "The currently running update for 'dev' has been canceled!" ;;
+  free) echo "error: no lock files found for stack 'dev'" >&2; exit 255 ;;
+  broken) echo "error: failed to load checkpoint: access denied" >&2; exit 255 ;;
+esac

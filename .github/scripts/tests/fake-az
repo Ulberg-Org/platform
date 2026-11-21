@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# A stand-in for `az group show --name rg-<env> --query tags.started -o tsv` in test_due_environments.sh:
+# dev's group was started at $DEV_STARTED (empty: no such group).
+case "$4" in
+  rg-dev) [ -n "$DEV_STARTED" ] && echo "$DEV_STARTED" || { echo "ERROR: (ResourceGroupNotFound)" >&2; exit 3; } ;;
+  *) echo "ERROR: (ResourceGroupNotFound)" >&2; exit 3 ;;
+esac
