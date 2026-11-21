@@ -84,6 +84,9 @@ for repo in "${repos[@]}" platform; do
   vm "[ -d ~/$repo ] || GIT_TERMINAL_PROMPT=0 git clone -q https://github.com/Ulberg-Org/$repo ~/$repo" ||
     { echo "Ulberg-Org/$repo isn't a repo Claude's GitHub app can read" >&2; exit 1; }
 done
+# .NET from Nix needs a newer glibc than the VM's Ubuntu: programs run through `dotnet`, not their native
+# launcher (which loads the system's libraries).
+vm "echo 'export UseAppHost=false' | sudo tee /etc/profile.d/dotnet-apphost.sh >/dev/null"
 # The profile's own tools (D79), from its repo's flake: the platform's include an app's (.NET, cosign), and both
 # at once would clash.
 vm "grep -q flakes /etc/nix/nix.conf || echo 'experimental-features = nix-command flakes' | sudo tee -a /etc/nix/nix.conf >/dev/null"
