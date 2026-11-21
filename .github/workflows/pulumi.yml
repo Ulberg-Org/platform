@@ -128,6 +128,8 @@ jobs:
           comment-on-summary: true
         env:
           GITHUB_TOKEN: ${{ steps.github.outputs.token }}
+          # The budget's recipients (D40, D89).
+          PLATFORM_ALERT_EMAILS: ${{ secrets.PLATFORM_ALERT_EMAILS }}
 
   # The required check (`pulumi preview` in the ruleset). It fails explicitly unless both jobs succeeded: a job
   # that was skipped because another failed would otherwise count as passed.
@@ -201,3 +203,5 @@ jobs:
           comment-on-summary: true
         env:
           GITHUB_TOKEN: ${{ steps.github.outputs.token }}
+          # The budget's recipients (D40, D89).
+          PLATFORM_ALERT_EMAILS: ${{ secrets.PLATFORM_ALERT_EMAILS }}

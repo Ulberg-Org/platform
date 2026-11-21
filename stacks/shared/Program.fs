@@ -92,8 +92,13 @@ let private run () =
     let environments =
         config.RequireObject<string list> "environments" |> Environment.parse
 
-    match apps, environments with
-    | Ok apps, Ok environments ->
+    let recipients =
+        match alertEmails with
+        | [] -> Error "PLATFORM_ALERT_EMAILS is empty: the budget alert (D89) would reach nobody"
+        | emails -> Ok emails
+
+    match apps, environments, recipients with
+    | Ok apps, Ok environments, Ok alertEmails ->
         // 3. Action
         let group =
             ResourceGroup("rg-platform-shared", ResourceGroupArgs(ResourceGroupName = "rg-platform-shared"))
@@ -320,7 +325,9 @@ let private run () =
             ]
     | _ ->
         let problems =
-            problemsOf apps @ problemsOf (Result.mapError List.singleton environments)
+            problemsOf apps
+            @ problemsOf (Result.mapError List.singleton environments)
+            @ problemsOf (Result.mapError List.singleton recipients)
 
         problems |> List.iter (fun p -> Log.Error p)
         raise (RunException $"shared: {List.length problems} problem(s), see the errors above")
