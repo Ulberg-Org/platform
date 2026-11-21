@@ -90,11 +90,16 @@ let databaseTests =
                 Expect.equal (AppDatabase.serviceAccount todo) "system:serviceaccount:todo:backend" "subject"
             }
 
-            test "the roles are the shared SQL, then Azure's, filled in for the app" {
-                let sql =
-                    AppDatabase.rolesSql "CREATE ROLE @db@_app NOLOGIN;" "GRANT @db@_app TO \"@backend@\";" "dev" todo
+            test "the shared roles and Azure's sign-ins are filled in for the app, each a script of its own" {
+                Expect.equal
+                    (AppDatabase.fill "dev" todo "CREATE ROLE @db@_app NOLOGIN;")
+                    "CREATE ROLE todo_app NOLOGIN;"
+                    "roles"
 
-                Expect.equal sql "CREATE ROLE todo_app NOLOGIN;\nGRANT todo_app TO \"id-todo-backend-dev\";" "filled"
+                Expect.equal
+                    (AppDatabase.fill "dev" todo "GRANT @db@_app TO \"@backend@\";")
+                    "GRANT todo_app TO \"id-todo-backend-dev\";"
+                    "Azure's"
             }
         ]
 

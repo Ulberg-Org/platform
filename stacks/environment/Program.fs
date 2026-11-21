@@ -516,7 +516,8 @@ let private run () =
                             Data =
                                 inputMap
                                     [
-                                        "roles.sql", input (AppDatabase.rolesSql rolesSql azureSql environment d)
+                                        "roles.sql", input (AppDatabase.fill environment d rolesSql)
+                                        "azure.sql", input (AppDatabase.fill environment d azureSql)
                                         "azure-roles.sh", input rolesScript
                                     ]
                         ),
