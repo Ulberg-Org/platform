@@ -1,7 +1,7 @@
 # The dev environment in Azure (D45, D61): on demand, rendered from the same model as local (D60).
 name: dev
 mode: release
-registry: crplatform21784576.azurecr.io
+registry: crplatformno21784576.azurecr.io
 kubernetesVersion: "1.37"
 git: https://github.com/Ulberg-Org
 components: [ argocd, baseline, gateway ]

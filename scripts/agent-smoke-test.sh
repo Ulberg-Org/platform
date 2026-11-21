@@ -51,7 +51,7 @@ az rest --method GET --url "https://graph.microsoft.com/v1.0/auditLogs/signIns?\
 
 echo "Writes (must be refused)"
 probe=rg-agent-write-probe
-if az group create --name "$probe" --location swedencentral -o none 2>"$err"; then
+if az group create --name "$probe" --location norwayeast -o none 2>"$err"; then
   bad "created resource group $probe (deleting it)"
   az group delete --name "$probe" --yes --no-wait
 else
