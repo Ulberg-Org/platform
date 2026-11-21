@@ -1,0 +1,29 @@
+# Guards the doors a pull request could open for itself. Runs main's copy of the checks
+# (`pull_request_target` checks out the base branch), so a pull request can't change the check that judges it;
+# the pull request's files are only read as data, never run. No secrets, read-only rights. A required check
+# in the ruleset (stacks/access).
+name: guard
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: workflow guard
+    runs-on: ubuntu-latest
+    steps:
+      # main's checks.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The pull request's files, as data only.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pull-request
+          persist-credentials: false
+      - name: Only destroy.yml may use the teardown environment (D45)
+        run: .github/scripts/check_teardown_use.sh pull-request/.github/workflows
