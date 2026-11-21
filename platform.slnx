@@ -9,11 +9,15 @@
   <Folder Name="/stacks/access/">
     <Project Path="stacks/access/Access.fsproj" />
   </Folder>
+  <Folder Name="/stacks/environment/">
+    <Project Path="stacks/environment/Environment.fsproj" />
+  </Folder>
   <Folder Name="/stacks/shared/">
     <Project Path="stacks/shared/Shared.fsproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Access.Tests/Access.Tests.fsproj" />
+    <Project Path="tests/Environment.Tests/Environment.Tests.fsproj" />
     <Project Path="tests/Shared.Tests/Shared.Tests.fsproj" />
     <Project Path="tests/Renderer.Tests/Renderer.Tests.fsproj" />
   </Folder>

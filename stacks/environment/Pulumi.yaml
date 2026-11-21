@@ -1,0 +1,3 @@
+name: environment
+runtime: dotnet
+description: "An environment (D45, D82): its network, AKS and Postgres, rebuilt on every start and destroyed after 4 h"

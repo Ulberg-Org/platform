@@ -131,15 +131,53 @@ jobs:
           # The budget's recipients (D40, D89).
           PLATFORM_ALERT_EMAILS: ${{ secrets.PLATFORM_ALERT_EMAILS }}
 
-  # The required check (`pulumi preview` in the ruleset). It fails explicitly unless both jobs succeeded: a job
+  # Environments (D45) are previewed here but never applied by this workflow: the `start` workflow creates
+  # them, `destroy` removes them after 4 hours. So they're outside stacks/order.yaml's preview/apply pair.
+  preview-environments:
+    name: pulumi preview (environments)
+    concurrency:
+      group: pulumi-preview-environments-${{ github.ref }}
+      cancel-in-progress: true
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_PREVIEW_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+      - name: Azure sign-in (read-only preview identity)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_PREVIEW_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
+        with:
+          command: preview
+          stack-name: dev
+          work-dir: stacks/environment
+          upsert: true
+          secrets-provider: azurekeyvault://kv-platform-21784576.vault.azure.net/keys/pulumi
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+          diff: true
+          comment-on-summary: true
+
+  # The required check (`pulumi preview` in the ruleset). It fails explicitly unless all the jobs succeeded: a job
   # that was skipped because another failed would otherwise count as passed.
   gate:
     name: pulumi preview
-    needs: [ checks, preview ]
+    needs: [ checks, preview, preview-environments ]
     if: always() && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
-      - run: '[ "${{ needs.checks.result }}" = success ] && [ "${{ needs.preview.result }}" = success ]'
+      - run: '[ "${{ needs.checks.result }}" = success ] && [ "${{ needs.preview.result }}" = success ] && [ "${{ needs.preview-environments.result }}" = success ]'
 
   apply:
     name: pulumi up
