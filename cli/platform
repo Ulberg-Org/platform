@@ -187,9 +187,9 @@ failing_pods() { # namespace
 
 # A bootstrap step that waits for its pods: fails within its time, saying which pods and why (D61 speed).
 installed() { # namespace, then the command
-  local ns=$1
+  local ns=$1 out
   shift
-  "$@" >/dev/null 2>&1 || { echo "Not ready: $ns" >&2; failing_pods "$ns"; exit 1; }
+  out=$("$@" 2>&1) || { echo "Not ready: $ns" >&2; tail -5 <<<"$out" >&2; failing_pods "$ns"; exit 1; }
 }
 
 # Claude's own Grafana account (D41 locally): a Viewer service account with a token in $state, which the app
