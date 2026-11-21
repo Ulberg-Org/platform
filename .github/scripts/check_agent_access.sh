@@ -2,7 +2,8 @@
 # Regression test for Claude's agent accounts (D41), against the real tenant. Each agent in
 # access/people.yaml must hold exactly its read roles:
 #   - Azure: Reader, Monitoring Reader, Log Analytics Reader, Cost Management Reader on the subscription
-#     (via platform-agents), plus, on the Claude GitHub App key only, Key Vault Crypto User (D52: sign);
+#     (via platform-agents), plus, on the Claude GitHub App key only, Key Vault Crypto User (D52: sign), and on
+#     each running environment's cluster only, AKS Cluster User and RBAC Reader (D84, D88: read, no Secrets);
 #   - Entra roles: Security Reader, active; nothing eligible;
 #   - PIM for Groups: no eligibility, neither for the account nor for platform-agents;
 #   - groups: platform-agents only (so it inherits nothing).
@@ -19,6 +20,13 @@ vault=$(yq '.config["access:keyVault"]' stacks/access/Pulumi.main.yaml)
 vault_rg=$(yq '.config["access:ciIdentityResourceGroup"]' stacks/access/Pulumi.main.yaml)
 app_key_signer="Key Vault Crypto User @ $sub/resourceGroups/$vault_rg/providers/Microsoft.KeyVault/vaults/$vault/keys/claude-github-app"
 security_reader=5d6b6bb7-de71-4623-b4af-96380a352509
+# D88: reads on each environment's own cluster (stacks/environment/Pulumi.<env>.yaml), while it runs.
+cluster_reads=$(for config in stacks/environment/Pulumi.*.yaml; do
+  env=$(basename "$config" .yaml | sed 's/^Pulumi\.//')
+  for role in "Azure Kubernetes Service Cluster User Role" "Azure Kubernetes Service RBAC Reader"; do
+    echo "$role @ $sub/resourceGroups/rg-$env/providers/Microsoft.ContainerService/managedClusters/aks-$env"
+  done
+done)
 
 problems=()
 # Compares two newline-separated lists (order doesn't matter) and records any difference.
@@ -48,7 +56,8 @@ for key in $agents; do
 
   expect "$upn: Azure roles" \
     "$(az role assignment list --all --assignee "$id" --include-groups --include-inherited \
-      --query "[].join(' @ ', [roleDefinitionName, scope])" -o tsv | grep -vxF "$app_key_signer" || true)" \
+      --query "[].join(' @ ', [roleDefinitionName, scope])" -o tsv |
+      grep -vxF -e "$app_key_signer" -f <(echo "$cluster_reads") || true)" \
     "$azure_roles"
   expect "$upn: active Entra roles" \
     "$(az rest --method GET \
