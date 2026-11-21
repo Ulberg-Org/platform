@@ -502,6 +502,7 @@ sync() {
   renderer=$(build_renderer)
   read_plan
   join_kind
+  egress_proxy # its port may have changed
   if [ "$renderer" = changed ]; then
     load_renderer "$renderer_image" >/dev/null
     k -n argocd rollout restart deployment/argocd-repo-server >/dev/null
