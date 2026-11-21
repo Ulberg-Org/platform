@@ -13,6 +13,8 @@ FROM docker.io/sbx/claude:latest@sha256:6769221b4de7e194f8ae8b0111ca64a1dec7182a
 USER root
 COPY --from=tools /closure /nix/store
 COPY --from=tools /tools /opt/tools
+# Claude publishes branches as one verified commit through GitHub's API (D52), not `git push`.
+COPY claude-push.sh /usr/local/bin/claude-push
 # Claude's identity (D52, D78): commits as the app, and GitHub over HTTPS, which the sandbox's proxy signs with the
 # app's token (there's no SSH key in here).
 RUN git config --system url."https://github.com/".insteadOf "git@github.com:" \

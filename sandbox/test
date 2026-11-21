@@ -27,4 +27,15 @@ check "of the developer's machine, nothing but Grafana and the gateway (D80): no
   'curl -s -m 5 -o /dev/null -w "%{http_code}" http://host.docker.internal:5432 | grep -vx 403'
 check "nor the cluster's Kubernetes API" \
   'port=$(grep -m1 -o "127.0.0.1:[0-9]*" .local/kubeconfig-claude | cut -d: -f2); curl -s -k -m 5 -o /dev/null -w "%{http_code}" https://host.docker.internal:$port | grep -vx 403'
+# From the host: the platform profile is refused to an agent whose developer isn't an infra developer (D77), against
+# a copy of access/people.yaml without any.
+fixture=$(mktemp -d); mkdir "$fixture/access"; cp -R "$(dirname "$0")" "$fixture/sandbox"
+yq '.groups.infra-developers = []' "$(dirname "$0")/../access/people.yaml" > "$fixture/access/people.yaml"
+refusal=$("$fixture/sandbox/sandbox" platform </dev/null 2>&1 || true)
+if grep -q "isn't an infra developer" <<<"$refusal"; then
+  echo "  ok    the platform profile is refused to non-infra developers"
+else
+  echo "  FAIL  the platform profile is refused to non-infra developers"; failed=1
+fi
+rm -rf "$fixture"
 exit $failed
