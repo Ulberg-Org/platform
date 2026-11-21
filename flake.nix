@@ -9,8 +9,8 @@
       forEach = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
-      # The sandbox's image (platform profile) adds only what Docker's Claude sandbox image lacks (it has Docker, git,
-      # gh, make, jq). Not az: Azure is reached through a proxy on the developer's machine (D78).
+      # Claude's sandbox VM (platform profile, D81) installs these; its template brings Docker, git, gh, make and jq.
+      # Not az: Azure in the sandbox waits for Phase 3.
       packages = forEach (pkgs: {
         tools = pkgs.buildEnv {
           name = "platform-sandbox-tools";
