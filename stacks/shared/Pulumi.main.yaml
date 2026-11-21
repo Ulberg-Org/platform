@@ -12,3 +12,10 @@ config:
   shared:apps:
     - app: todo
       repoSubject: repo:Ulberg-Org@358725408/todo@1450696692
+  # Environments that keep an address here (D45): a static IP and <dnsPrefix>-<environment>.<region>.cloudapp.azure.com.
+  shared:environments: [ dev ]
+  shared:dnsPrefix: ulberg
+  # Telemetry storage (D89); globally unique, letters and digits only.
+  shared:telemetryAccountName: sttelemetry21784576
+  # The monthly budget alert (D89), in the subscription's billing currency.
+  shared:budgetMonthly: 500

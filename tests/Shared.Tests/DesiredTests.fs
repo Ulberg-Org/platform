@@ -33,3 +33,27 @@ let tests =
                         action
             }
         ]
+
+[<Tests>]
+let environmentTests =
+    testList
+        "shared: what every environment keeps"
+        [
+            test "an environment's address is a DNS label from the prefix and its name" {
+                Expect.equal (Environment.dnsLabel "ulberg" "dev") "ulberg-dev" "label"
+            }
+
+            test "only known environment names are accepted" {
+                Expect.equal (Environment.parse [ "dev"; "prod" ]) (Ok [ "dev"; "prod" ]) "dev and prod"
+                Expect.isError (Environment.parse [ "dev"; "staging" ]) "staging isn't an environment"
+            }
+
+            test "telemetry keeps 14 days, in one container per store" {
+                Expect.equal Telemetry.retentionDays 14 "days"
+                Expect.equal Telemetry.containers [ "loki"; "tempo" ] "containers"
+            }
+
+            test "the budget warns at half, most and all of it" {
+                Expect.equal Budget.thresholds [ 50; 80; 100 ] "thresholds"
+            }
+        ]

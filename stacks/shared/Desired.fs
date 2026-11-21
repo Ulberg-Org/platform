@@ -32,3 +32,26 @@ let repositoryCondition (prefix: string) =
 
     $"(({actions}) OR (@Request[Microsoft.ContainerRegistry/registries/repositories:name] "
     + $"StringStartsWithIgnoreCase '{prefix}'))"
+
+/// The environments that may exist (D45): each keeps a static IP and a DNS label here, so its address never
+/// changes although it's rebuilt every time.
+module Environment =
+    let known = [ "dev"; "prod" ]
+
+    let parse (names: string list) : Result<string list, string> =
+        match names |> List.filter (fun n -> not (List.contains n known)) with
+        | [] -> Ok names
+        | unknown ->
+            Error $"""shared:environments: unknown {String.concat ", " unknown} (known: {String.concat ", " known})"""
+
+    /// `<prefix>-<environment>`, i.e. <prefix>-dev.<region>.cloudapp.azure.com.
+    let dnsLabel (prefix: string) (environment: string) = $"{prefix}-{environment}"
+
+/// Telemetry storage (D89): written by Loki and Tempo from Phase 5; kept 14 days.
+module Telemetry =
+    let retentionDays = 14
+    let containers = [ "loki"; "tempo" ]
+
+/// The monthly budget alert (D89): percentages at which the alert list hears about it.
+module Budget =
+    let thresholds = [ 50; 80; 100 ]
