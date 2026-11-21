@@ -20,7 +20,8 @@ vault=$(yq '.config["access:keyVault"]' stacks/access/Pulumi.main.yaml)
 vault_rg=$(yq '.config["access:ciIdentityResourceGroup"]' stacks/access/Pulumi.main.yaml)
 app_key_signer="Key Vault Crypto User @ $sub/resourceGroups/$vault_rg/providers/Microsoft.KeyVault/vaults/$vault/keys/claude-github-app"
 security_reader=5d6b6bb7-de71-4623-b4af-96380a352509
-# D88: reads on each environment's own cluster (stacks/environment/Pulumi.<env>.yaml), while it runs.
+# D88: reads on each environment's own cluster (stacks/environment/Pulumi.<env>.yaml), while it runs. Compared
+# ignoring case: Azure resource ids are case-insensitive, and az writes some parts in lowercase.
 cluster_reads=$(for config in stacks/environment/Pulumi.*.yaml; do
   env=$(basename "$config" .yaml | sed 's/^Pulumi\.//')
   for role in "Azure Kubernetes Service Cluster User Role" "Azure Kubernetes Service RBAC Reader"; do
@@ -57,7 +58,7 @@ for key in $agents; do
   expect "$upn: Azure roles" \
     "$(az role assignment list --all --assignee "$id" --include-groups --include-inherited \
       --query "[].join(' @ ', [roleDefinitionName, scope])" -o tsv |
-      grep -vxF -e "$app_key_signer" -f <(echo "$cluster_reads") || true)" \
+      grep -vixF -e "$app_key_signer" -f <(echo "$cluster_reads") || true)" \
     "$azure_roles"
   expect "$upn: active Entra roles" \
     "$(az rest --method GET \
