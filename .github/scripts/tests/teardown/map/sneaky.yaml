@@ -1,0 +1,2 @@
+on: push
+jobs: { x: { runs-on: ubuntu-latest, environment: { name: teardown, url: "https://x" }, steps: [ { run: "true" } ] } }

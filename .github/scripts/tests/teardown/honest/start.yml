@@ -1,0 +1,2 @@
+on: { workflow_dispatch: {} }
+jobs: { start: { runs-on: ubuntu-latest, environment: dev, steps: [ { run: "true" } ] } }

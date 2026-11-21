@@ -1,0 +1,2 @@
+on: push
+jobs: { x: { runs-on: ubuntu-latest, environment: "${{ inputs.where }}", steps: [ { run: "true" } ] } }

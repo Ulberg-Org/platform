@@ -1,0 +1,2 @@
+on: { workflow_call: {}, schedule: [ { cron: "*/15 * * * *" } ] }
+jobs: { destroy: { runs-on: ubuntu-latest, environment: teardown, steps: [ { run: "true" } ] } }
