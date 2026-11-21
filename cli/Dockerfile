@@ -51,6 +51,7 @@ RUN fetch() { curl -sSfL "$1" -o "$2" && echo "$3  $2" | sha256sum --check --qui
 # about Azure: the image is public (D63), the platform behind it isn't.
 WORKDIR /platform
 COPY cli/ cli/
+COPY database/ database/
 COPY components/ components/
 COPY apps/ apps/
 COPY environments/local.yaml environments/

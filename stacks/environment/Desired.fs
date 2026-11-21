@@ -95,6 +95,20 @@ module Cluster =
             "platform-write", [ ClusterUser; RbacClusterAdmin ]
         ]
 
+    /// CI's identities: apply runs the bootstrap (the database's roles; Argo CD in Phase 4), preview only reads.
+    let ciAccess =
+        [
+            "apply", [ ClusterUser; RbacClusterAdmin ]
+            "preview", [ ClusterUser; RbacReader ]
+        ]
+
+    let private template =
+        System.IO.File.ReadAllText(System.IO.Path.Combine(System.AppContext.BaseDirectory, "kubeconfig.yaml"))
+
+    /// CI's kubeconfig: the cluster's address and CA, and kubelogin for the sign-in (kubeconfig.yaml).
+    let kubeconfig (server: string) (ca: string) =
+        template.Replace("@server@", server).Replace("@ca@", ca)
+
 /// Built-in roles the environment's own identities get.
 module AzureRole =
     let acrPull = "7f951dda-4ed3-4680-a7ca-43fe172d538d"
@@ -124,3 +138,23 @@ module Names =
             databaseAdmin = $"id-db-admin-{environment}"
             databaseZone = $"{environment}.private.postgres.database.azure.com"
         }
+
+/// An app's database on the environment's server (D69, D85), and the service that uses it.
+type AppDatabase =
+    {
+        name: string
+        app: string
+        service: string
+    }
+
+module AppDatabase =
+    /// The service's workload identity, which the database knows by this name.
+    let identity (environment: string) (d: AppDatabase) = $"id-{d.app}-{d.service}-{environment}"
+
+    /// The Kubernetes service account the service runs as (the renderer's, Phase 4): namespace = app.
+    let serviceAccount (d: AppDatabase) =
+        $"system:serviceaccount:{d.app}:{d.service}"
+
+    /// The shared roles (database/roles.sql), then who signs in as them in Azure (database/azure.sql).
+    let rolesSql (roles: string) (azure: string) (environment: string) (d: AppDatabase) =
+        $"{roles}\n{azure}".Replace("@db@", d.name).Replace("@backend@", identity environment d)

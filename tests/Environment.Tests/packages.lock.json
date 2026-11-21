@@ -23,6 +23,11 @@
         "resolved": "0.4.1",
         "contentHash": "axFeEMfmEORy3ipAzOXG/lE+KcNptRbei3F0C4kQCdeiQtW+qJW90K5iIovITGrdLt8AjhNCwk5qLSX9/rFpoA=="
       },
+      "Glob": {
+        "type": "Transitive",
+        "resolved": "1.1.5",
+        "contentHash": "N1kGneRrxfXn933JAIB61LCGPu+WEbr+qObpGqNNw125nQbuGusoBLe6skj7D0Zyjzhmrc2IdEx32ijYEdGdEA=="
+      },
       "Google.Protobuf": {
         "type": "Transitive",
         "resolved": "3.36.1",
@@ -278,6 +283,15 @@
           "Pulumi": "3.116.2"
         }
       },
+      "Pulumi.Kubernetes": {
+        "type": "Transitive",
+        "resolved": "4.34.3",
+        "contentHash": "fIjkZ8G5q4N6VnqWOCUfATVXD4uPxrfs5sfgRxvz+xEl8gy+2YIY4PtxNTZYz+gpdzeLditlcl4EJe3zsq3uog==",
+        "dependencies": {
+          "Glob": "1.1.5",
+          "Pulumi": "3.116.2"
+        }
+      },
       "Semver": {
         "type": "Transitive",
         "resolved": "3.0.0",
@@ -316,7 +330,8 @@
           "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.20.1, )",
           "Pulumi": "[3.116.2, )",
           "Pulumi.AzureNative": "[3.30.0, )",
-          "Pulumi.FSharp": "[3.116.2, )"
+          "Pulumi.FSharp": "[3.116.2, )",
+          "Pulumi.Kubernetes": "[4.34.3, )"
         }
       }
     }

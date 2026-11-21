@@ -27,6 +27,19 @@ let private run () =
     let registryName = config.Require "registryName"
     let nodeCount = config.RequireInt32 "nodeCount"
     let nodeSize = config.Require "nodeSize"
+    let databases = config.RequireObject<AppDatabase list> "databases"
+    let ciIdentityGroup = config.Require "ciIdentityGroup"
+    let rolesImage = config.Require "rolesImage"
+    let rolesNamespace = "platform-db"
+    // The database's roles: the same SQL as locally (D85), then Azure's sign-ins, run by azure-roles.sh.
+    let databaseFile name =
+        System.IO.File.ReadAllText(
+            System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "..", "..", "database", name)
+        )
+
+    let rolesSql = databaseFile "roles.sql"
+    let azureSql = databaseFile "azure.sql"
+    let rolesScript = databaseFile "azure-roles.sh"
     let sharedGroup = $"{subscription}/resourceGroups/{sharedGroupName}"
 
     let registry =
@@ -352,24 +365,271 @@ let private run () =
                 CustomResourceOptions(DependsOn = inputList [ input (zoneLink :> Resource) ])
             )
 
-        DBforPostgreSQL.Administrator(
-            $"{names.database}-admin",
-            DBforPostgreSQL.AdministratorArgs(
-                ResourceGroupName = group.Name,
-                ServerName = database.Name,
-                ObjectId = databaseAdmin.PrincipalId,
-                PrincipalName = databaseAdmin.Name,
-                PrincipalType = DBforPostgreSQL.PrincipalType.ServicePrincipal,
-                TenantId = tenantId
+        let administrator =
+            DBforPostgreSQL.Administrator(
+                $"{names.database}-admin",
+                DBforPostgreSQL.AdministratorArgs(
+                    ResourceGroupName = group.Name,
+                    ServerName = database.Name,
+                    ObjectId = databaseAdmin.PrincipalId,
+                    PrincipalName = databaseAdmin.Name,
+                    PrincipalType = DBforPostgreSQL.PrincipalType.ServicePrincipal,
+                    TenantId = tenantId
+                )
             )
-        )
-        |> ignore
+
+        // Identities that pods use (workload identity, D69): trusted for one Kubernetes service account each.
+        let issuer = cluster.OidcIssuerProfile.Apply(fun p -> p.IssuerURL)
+
+        let federate (identity: ManagedIdentity.UserAssignedIdentity) (identityName: string) (subject: string) =
+            ManagedIdentity.FederatedIdentityCredential(
+                $"{identityName}-aks",
+                ManagedIdentity.FederatedIdentityCredentialArgs(
+                    ResourceGroupName = group.Name,
+                    ResourceName = identity.Name,
+                    FederatedIdentityCredentialResourceName = "aks",
+                    Issuer = io issuer,
+                    Subject = subject,
+                    Audiences = inputList [ input "api://AzureADTokenExchange" ]
+                )
+            )
+
+        let adminFederation =
+            federate databaseAdmin names.databaseAdmin $"system:serviceaccount:{rolesNamespace}:db-admin"
+
+        // Each app's database, and its service's identity, which the database knows by name (D69, D85).
+        let appDatabases =
+            databases
+            |> List.map (fun d ->
+                let identityName = AppDatabase.identity environment d
+
+                let identity =
+                    ManagedIdentity.UserAssignedIdentity(
+                        identityName,
+                        ManagedIdentity.UserAssignedIdentityArgs(
+                            ResourceGroupName = group.Name,
+                            ResourceName = identityName
+                        )
+                    )
+
+                federate identity identityName (AppDatabase.serviceAccount d) |> ignore
+
+                d,
+                DBforPostgreSQL.Database(
+                    $"{names.database}-{d.name}",
+                    DBforPostgreSQL.DatabaseArgs(
+                        ResourceGroupName = group.Name,
+                        ServerName = database.Name,
+                        DatabaseName = d.name,
+                        Charset = "UTF8",
+                        Collation = "en_US.utf8"
+                    )
+                ))
+
+        // CI in the cluster: apply runs the bootstrap below, preview only reads (Cluster.ciAccess).
+        let ciAccess =
+            Cluster.ciAccess
+            |> List.collect (fun (name, roles) ->
+                let identity =
+                    ManagedIdentity.GetUserAssignedIdentity.Invoke(
+                        ManagedIdentity.GetUserAssignedIdentityInvokeArgs(
+                            ResourceGroupName = ciIdentityGroup,
+                            ResourceName = $"id-platform-{name}"
+                        )
+                    )
+
+                roles
+                |> List.map (fun clusterRole ->
+                    Authorization.RoleAssignment(
+                        $"aks-{environment}-ci-{name}-{(string clusterRole).ToLowerInvariant()}",
+                        Authorization.RoleAssignmentArgs(
+                            Scope = cluster.Id,
+                            RoleDefinitionId = role (ClusterRole.definitionId clusterRole),
+                            PrincipalId = io (identity.Apply(fun i -> i.PrincipalId)),
+                            PrincipalType = Authorization.PrincipalType.ServicePrincipal,
+                            Description = $"CI ({name}): {clusterRole} on AKS {environment}"
+                        )
+                    )))
+
+        // The cluster, for Pulumi: its address and CA, and kubelogin as the job's az session (Cluster.kubeconfig).
+        let caData =
+            ContainerService.ListManagedClusterUserCredentials
+                .Invoke(
+                    ContainerService.ListManagedClusterUserCredentialsInvokeArgs(
+                        ResourceGroupName = group.Name,
+                        ResourceName = cluster.Name
+                    )
+                )
+                .Apply(fun c ->
+                    let config =
+                        System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String c.Kubeconfigs[0].Value)
+
+                    System.Text.RegularExpressions.Regex
+                        .Match(config, "certificate-authority-data: (\\S+)")
+                        .Groups[1].Value)
+
+        let kubeconfig =
+            Output.Tuple(cluster.Fqdn, caData).Apply(fun struct (fqdn, ca) -> Cluster.kubeconfig fqdn ca)
+
+        let kubernetes =
+            Pulumi.Kubernetes.Provider(
+                $"aks-{environment}",
+                Pulumi.Kubernetes.ProviderArgs(KubeConfig = io kubeconfig, DeleteUnreachable = true),
+                CustomResourceOptions(DependsOn = inputList (ciAccess |> List.map (fun r -> input (r :> Resource))))
+            )
+
+        let inCluster = CustomResourceOptions(Provider = kubernetes)
+
+        // The bootstrap (D85): a Job per database applies its roles as the server's Entra admin, once per server.
+        let rolesNs =
+            Pulumi.Kubernetes.Core.V1.Namespace(
+                rolesNamespace,
+                Pulumi.Kubernetes.Types.Inputs.Core.V1.NamespaceArgs(
+                    Metadata = Pulumi.Kubernetes.Types.Inputs.Meta.V1.ObjectMetaArgs(Name = rolesNamespace)
+                ),
+                inCluster
+            )
+
+        let rolesAccount =
+            Pulumi.Kubernetes.Core.V1.ServiceAccount(
+                "db-admin",
+                Pulumi.Kubernetes.Types.Inputs.Core.V1.ServiceAccountArgs(
+                    Metadata =
+                        Pulumi.Kubernetes.Types.Inputs.Meta.V1.ObjectMetaArgs(
+                            Name = "db-admin",
+                            Namespace = rolesNamespace,
+                            Annotations = inputMap [ "azure.workload.identity/client-id", io databaseAdmin.ClientId ]
+                        )
+                ),
+                CustomResourceOptions(Provider = kubernetes, DependsOn = inputList [ input (rolesNs :> Resource) ])
+            )
+
+        let rolesJobs =
+            appDatabases
+            |> List.map (fun (d, appDatabase) ->
+                let files =
+                    Pulumi.Kubernetes.Core.V1.ConfigMap(
+                        $"roles-{d.name}",
+                        Pulumi.Kubernetes.Types.Inputs.Core.V1.ConfigMapArgs(
+                            Metadata =
+                                Pulumi.Kubernetes.Types.Inputs.Meta.V1.ObjectMetaArgs(Namespace = rolesNamespace),
+                            Data =
+                                inputMap
+                                    [
+                                        "roles.sql", input (AppDatabase.rolesSql rolesSql azureSql environment d)
+                                        "azure-roles.sh", input rolesScript
+                                    ]
+                        ),
+                        CustomResourceOptions(
+                            Provider = kubernetes,
+                            DependsOn = inputList [ input (rolesNs :> Resource) ]
+                        )
+                    )
+
+                let env (name: string) (value: Input<string>) =
+                    input (Pulumi.Kubernetes.Types.Inputs.Core.V1.EnvVarArgs(Name = name, Value = value))
+
+                let container =
+                    Pulumi.Kubernetes.Types.Inputs.Core.V1.ContainerArgs(
+                        Name = "roles",
+                        Image = rolesImage,
+                        Command = inputList [ input "/bin/sh"; input "/job/azure-roles.sh" ],
+                        Env =
+                            inputList
+                                [
+                                    env "PGHOST" (io database.FullyQualifiedDomainName)
+                                    env "PGUSER" (input names.databaseAdmin)
+                                    env "PGDATABASE" (input d.name)
+                                    env "PGSSLMODE" (input "require")
+                                ],
+                        VolumeMounts =
+                            inputList
+                                [
+                                    input (
+                                        Pulumi.Kubernetes.Types.Inputs.Core.V1.VolumeMountArgs(
+                                            Name = "job",
+                                            MountPath = "/job"
+                                        )
+                                    )
+                                ],
+                        SecurityContext =
+                            Pulumi.Kubernetes.Types.Inputs.Core.V1.SecurityContextArgs(
+                                AllowPrivilegeEscalation = false,
+                                ReadOnlyRootFilesystem = true,
+                                Capabilities =
+                                    Pulumi.Kubernetes.Types.Inputs.Core.V1.CapabilitiesArgs(
+                                        Drop = inputList [ input "ALL" ]
+                                    )
+                            )
+                    )
+
+                let pod =
+                    Pulumi.Kubernetes.Types.Inputs.Core.V1.PodSpecArgs(
+                        ServiceAccountName = "db-admin",
+                        RestartPolicy = "Never",
+                        SecurityContext =
+                            Pulumi.Kubernetes.Types.Inputs.Core.V1.PodSecurityContextArgs(
+                                RunAsNonRoot = true,
+                                RunAsUser = 70,
+                                SeccompProfile =
+                                    Pulumi.Kubernetes.Types.Inputs.Core.V1.SeccompProfileArgs(Type = "RuntimeDefault")
+                            ),
+                        Containers = inputList [ input container ],
+                        Volumes =
+                            inputList
+                                [
+                                    input (
+                                        Pulumi.Kubernetes.Types.Inputs.Core.V1.VolumeArgs(
+                                            Name = "job",
+                                            ConfigMap =
+                                                Pulumi.Kubernetes.Types.Inputs.Core.V1.ConfigMapVolumeSourceArgs(
+                                                    Name = io (files.Metadata.Apply(fun m -> m.Name))
+                                                )
+                                        )
+                                    )
+                                ]
+                    )
+
+                Pulumi.Kubernetes.Batch.V1.Job(
+                    $"roles-{d.name}",
+                    Pulumi.Kubernetes.Types.Inputs.Batch.V1.JobArgs(
+                        Metadata =
+                            Pulumi.Kubernetes.Types.Inputs.Meta.V1.ObjectMetaArgs(
+                                Namespace = rolesNamespace,
+                                // A new server (each start) is a new Job; the same server keeps its roles.
+                                Annotations = inputMap [ "platform/server", io database.Id ]
+                            ),
+                        Spec =
+                            Pulumi.Kubernetes.Types.Inputs.Batch.V1.JobSpecArgs(
+                                BackoffLimit = 3,
+                                Template =
+                                    Pulumi.Kubernetes.Types.Inputs.Core.V1.PodTemplateSpecArgs(
+                                        Metadata =
+                                            Pulumi.Kubernetes.Types.Inputs.Meta.V1.ObjectMetaArgs(
+                                                Labels = inputMap [ "azure.workload.identity/use", input "true" ]
+                                            ),
+                                        Spec = pod
+                                    )
+                            )
+                    ),
+                    CustomResourceOptions(
+                        Provider = kubernetes,
+                        DependsOn =
+                            inputList
+                                [
+                                    input (rolesAccount :> Resource)
+                                    input (administrator :> Resource)
+                                    input (adminFederation :> Resource)
+                                    input (appDatabase :> Resource)
+                                ]
+                    )
+                ))
 
         // 4. Report
         Log.Info(
             $"environment {environment}: VNet {network.vnet} (nodes {network.nodes}, database {network.database}), "
             + $"AKS {names.cluster} ({nodeCount} × {nodeSize}, {clusterAccess.Length} access grants), "
-            + $"Postgres {names.database}"
+            + $"""Postgres {names.database} ({databases |> List.map _.name |> String.concat ", "}, {rolesJobs.Length} roles Job(s))"""
         )
 
         dict
