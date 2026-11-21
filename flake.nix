@@ -14,7 +14,8 @@
       packages = forEach (pkgs: {
         tools = pkgs.buildEnv {
           name = "platform-sandbox-tools";
-          paths = with pkgs; [ cosign kind kubectl kubernetes-helm yq-go pulumi ]
+          # nodejs: npx starts the Kubernetes MCP server (.mcp.json).
+          paths = with pkgs; [ cosign kind kubectl kubernetes-helm yq-go pulumi nodejs_24 ]
             ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.dotnetCorePackages.sdk_11_0 ];
         };
       });
