@@ -60,7 +60,7 @@ let tests =
 
                 Expect.stringContains
                     dev["backend-deployment.yaml"]
-                    "image: crplatformno21784576.azurecr.io/todo/backend:55fb0bd"
+                    "image: crplatform21784576.azurecr.io/todo/backend:55fb0bd"
                     "the commit's signed image"
 
                 Expect.stringContains dev["backend-deployment.yaml"] "readOnlyRootFilesystem: true" "read-only"

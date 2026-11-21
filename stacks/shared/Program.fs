@@ -67,7 +67,6 @@ let private run () =
     let azure = Config "azure-native"
     let subscriptionId = azure.Require "subscriptionId"
     let tenantId = azure.Require "tenantId"
-    let location = azure.Require "location"
     let registryName = config.Require "registryName"
     let dnsPrefix = config.Require "dnsPrefix"
     let telemetryAccountName = config.Require "telemetryAccountName"
@@ -97,8 +96,7 @@ let private run () =
     | Ok apps, Ok environments ->
         // 3. Action
         let group =
-            // Named after its region: a resource group can't move, so a new region is a new group (D83).
-            ResourceGroup("rg-platform-shared", ResourceGroupArgs(ResourceGroupName = $"rg-platform-shared-{location}"))
+            ResourceGroup("rg-platform-shared", ResourceGroupArgs(ResourceGroupName = "rg-platform-shared"))
 
         let registry =
             Registry(
