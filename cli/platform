@@ -328,11 +328,25 @@ SQL
 # components' optional reference to it does nothing.
 egress_proxy() {
   [ -n "${HTTPS_PROXY:-}" ] || return 0
-  local ns
+  local address=${HTTPS_PROXY#*://} ns
+  address=${address##*@} && address=${address%%/*}
+  [[ ${address%:*} =~ ^[0-9.]+$ ]] ||
+    { echo "The proxy must be given by IP address (it's allowed by address, D66): $address" >&2; exit 1; }
   for ns in argocd observability; do
     k create namespace "$ns" --dry-run=client -o yaml | k apply -f - >/dev/null
     k -n "$ns" create configmap platform-proxy --from-literal=HTTPS_PROXY="$HTTPS_PROXY" \
       --from-literal=NO_PROXY="${NO_PROXY:-}" --dry-run=client -o yaml | k apply -f - >/dev/null
+    # Their network rules allow the internet on 443 only; the proxy listens elsewhere.
+    k apply -f - >/dev/null <<EOF
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: platform-proxy, namespace: $ns }
+spec:
+  endpointSelector: {}
+  egress:
+    - toCIDR: [ ${address%:*}/32 ]
+      toPorts: [ { ports: [ { port: "${address##*:}", protocol: TCP } ] } ]
+EOF
   done
 }
 
