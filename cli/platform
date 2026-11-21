@@ -36,6 +36,12 @@ platform_snapshot="$state/gitops/platform"
 k() { kubectl --kubeconfig "$cli_kubeconfig" "$@"; }
 h() { helm --kubeconfig "$cli_kubeconfig" "$@"; }
 step() { printf '\n== %s\n' "$*"; }
+# A file from cli/templates with its @name@ placeholders filled in: template <file> name=value...
+template() {
+  local file="$here/templates/$1" fill=() pair
+  for pair in "${@:2}"; do fill+=(-e "s|@${pair%%=*}@|${pair#*=}|g"); done
+  sed "${fill[@]}" "$file"
+}
 # Image builds download packages too: the machine's proxy, if it has one, for their RUN steps (Docker leaves these
 # predefined arguments out of the image's history).
 proxy_args=(--build-arg HTTP_PROXY --build-arg HTTPS_PROXY --build-arg NO_PROXY)
@@ -181,9 +187,9 @@ failing_pods() { # namespace
 
 # A bootstrap step that waits for its pods: fails within its time, saying which pods and why (D61 speed).
 installed() { # namespace, then the command
-  local ns=$1
+  local ns=$1 out
   shift
-  "$@" >/dev/null 2>&1 || { echo "Not ready: $ns" >&2; failing_pods "$ns"; exit 1; }
+  out=$("$@" 2>&1) || { echo "Not ready: $ns" >&2; tail -5 <<<"$out" >&2; failing_pods "$ns"; exit 1; }
 }
 
 # Claude's own Grafana account (D41 locally): a Viewer service account with a token in $state, which the app
@@ -303,25 +309,7 @@ database() { # name host
   until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
   sleep 2 # pg_isready answers before the init process has restarted the server
   until docker exec "$host" pg_isready -U postgres -d "$db" >/dev/null 2>&1; do sleep 1; done
-  docker exec -i "$host" psql -q -U postgres -d "$db" -v ON_ERROR_STOP=1 <<SQL
-CREATE ROLE ${db}_migrator LOGIN PASSWORD 'local-only-migrator';
-CREATE ROLE ${db}_app LOGIN PASSWORD 'local-only-app';
-CREATE ROLE ${db}_readonly LOGIN PASSWORD 'local-only-readonly';
-CREATE SCHEMA $db AUTHORIZATION ${db}_migrator;
-GRANT USAGE ON SCHEMA $db TO ${db}_app, ${db}_readonly;
-ALTER DEFAULT PRIVILEGES FOR ROLE ${db}_migrator IN SCHEMA $db GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${db}_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE ${db}_migrator IN SCHEMA $db GRANT SELECT ON TABLES TO ${db}_readonly;
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
--- Statistics (D64): per-query statistics, a monitor role for the collector (no data, only statistics), and
--- every query's statistics for the read-only role, which Claude's Postgres MCP uses (EXPLAIN, top queries).
-CREATE EXTENSION pg_stat_statements;
-CREATE ROLE ${db}_monitor LOGIN PASSWORD 'local-only-monitor' IN ROLE pg_monitor;
-GRANT pg_read_all_stats TO ${db}_readonly;
--- The read-only role (developers, and Claude's Postgres MCP, D75) may EXPLAIN ANALYZE: its privileges allow only
--- SELECT, its transactions are read-only by default, and nothing runs longer than 30 seconds.
-ALTER ROLE ${db}_readonly SET default_transaction_read_only = on;
-ALTER ROLE ${db}_readonly SET statement_timeout = '30s';
-SQL
+  template database.sql db="$db" | docker exec -i "$host" psql -q -U postgres -d "$db" -v ON_ERROR_STOP=1
   # The app's connection, as a Secret the rendered Deployment reads (Render.fs). Argo CD later adopts the
   # namespace (Cluster.fs), and leaves the Secret alone: it's not in git.
   k create namespace "$app" --dry-run=client -o yaml | k apply -f - >/dev/null
@@ -350,18 +338,7 @@ egress_proxy() {
     k -n "$ns" create configmap platform-proxy --from-literal=HTTPS_PROXY="$HTTPS_PROXY" \
       --from-literal=NO_PROXY="${NO_PROXY:-}" --dry-run=client -o yaml | k apply -f - >/dev/null
     # Their network rules allow the internet on 443 only; the proxy listens elsewhere.
-    k apply -f - >/dev/null <<EOF
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata: { name: platform-proxy, namespace: $ns }
-spec:
-  endpointSelector: {}
-  # Only adds the proxy: on its own, a first policy would deny the namespace everything else.
-  enableDefaultDeny: { egress: false, ingress: false }
-  egress:
-    - toCIDR: [ ${address%:*}/32 ]
-      toPorts: [ { ports: [ { port: "${address##*:}", protocol: TCP } ] } ]
-EOF
+    template proxy-policy.yaml namespace="$ns" ip="${address%:*}" port="${address##*:}" | k apply -f - >/dev/null
   done
 }
 
@@ -376,44 +353,7 @@ up() {
   down
   # The Kubernetes API's audit policy (D71), mounted into the control-plane node.
   mkdir -p "$state/audit" && cp "$here/audit-policy.yaml" "$state/audit/policy.yaml"
-  cat >"$state/kind.yaml" <<EOF
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-networking:
-  disableDefaultCNI: true # Cilium instead, which enforces network rules
-  apiServerPort: 9877 # fixed, next to the app and Grafana, so Claude's sandbox can be allowed exactly it (D80)
-nodes:
-  - role: control-plane
-    image: $KIND_NODE_IMAGE
-    # The API server writes an audit log, which the agent collector on this node reads (D71).
-    kubeadmConfigPatches:
-      - |
-        kind: ClusterConfiguration
-        apiServer:
-          extraArgs:
-            - { name: audit-policy-file, value: /etc/kubernetes/audit/policy.yaml }
-            - { name: audit-log-path, value: /var/log/kubernetes/audit/audit.log }
-            - { name: audit-log-maxsize, value: "50" }
-            - { name: audit-log-maxbackup, value: "2" }
-          # Footprint: a memory cap Go honours, so the API server gives memory back (it's the largest process).
-          extraEnvs:
-            - { name: GOMEMLIMIT, value: 700MiB }
-          extraVolumes:
-            - { name: audit-policy, hostPath: /etc/kubernetes/audit, mountPath: /etc/kubernetes/audit, readOnly: true, pathType: Directory }
-            - { name: audit-log, hostPath: /var/log/kubernetes/audit, mountPath: /var/log/kubernetes/audit, pathType: DirectoryOrCreate }
-    extraMounts: [ { hostPath: "$state/audit", containerPath: /etc/kubernetes/audit, readOnly: true } ]
-    extraPortMappings:
-      - { containerPort: 30875, hostPort: 9875, listenAddress: 127.0.0.1 } # the app, through the gateway
-      - { containerPort: 30876, hostPort: 9876, listenAddress: 127.0.0.1 } # Grafana
-  # Two workers, so an app's two instances sit on different nodes (D57); the app's repo is mounted on both
-  # for hot reload (D61) and for the git server's snapshots (D68).
-  - role: worker
-    image: $KIND_NODE_IMAGE
-    extraMounts: [ { hostPath: "$app_repo", containerPath: /src, readOnly: true } ]
-  - role: worker
-    image: $KIND_NODE_IMAGE
-    extraMounts: [ { hostPath: "$app_repo", containerPath: /src, readOnly: true } ]
-EOF
+  template kind.yaml node_image="$KIND_NODE_IMAGE" state="$state" app_repo="$app_repo" >"$state/kind.yaml"
   kind create cluster --name "$cluster" --config "$state/kind.yaml" --kubeconfig "$kubeconfig" --wait 0s
   join_kind
 
@@ -423,23 +363,8 @@ EOF
   # With the environment's networkFlows (D71): Hubble records the network's decisions. Dropped flows go to a file
   # on each node, which the agent collector reads; flow and drop counts per namespace go to Prometheus.
   hubble=$(jq -r .networkFlows <<<"$plan")
-  cat >"$state/cilium.yaml" <<EOF
-ipam: { mode: kubernetes }
-operator: { replicas: 1 }
-hubble:
-  enabled: $hubble
-  relay: { enabled: false }
-  metrics:
-    enabled: [ dns, drop, tcp, "flow:sourceContext=namespace;destinationContext=namespace", "policy:sourceContext=namespace;destinationContext=namespace" ]
-    serviceAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9965" }
-  export:
-    static:
-      enabled: $hubble
-      filePath: /var/run/cilium/hubble/events.log
-      allowList: [ '{"verdict":["DROPPED"]}' ] # Hubble flow filters, as JSON
-EOF
   installed kube-system h install cilium cilium/cilium --version "$CILIUM_CHART_VERSION" -n kube-system \
-    -f "$state/cilium.yaml" --wait --timeout 3m
+    -f "$here/templates/cilium.yaml" --set hubble.enabled="$hubble" --set hubble.export.static.enabled="$hubble" --wait --timeout 3m
   k wait --for=condition=Ready nodes --all --timeout=5m >/dev/null
 
   step "Images: the renderer and each service's dev target (D61)"
@@ -468,29 +393,7 @@ EOF
   installed "$namespace" h install argocd "$state"/charts/*.tgz -n "$namespace" --create-namespace \
     -f "$platform_root/components/argocd/values.yaml" -f "$platform_root/components/argocd/values-local.yaml" \
     --wait --timeout 5m
-  k apply -f - >/dev/null <<EOF
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: platform
-  namespace: argocd
-spec:
-  project: default
-  source:
-    repoURL: git://git.gitops.svc.cluster.local/platform
-    targetRevision: main
-    path: .
-    plugin:
-      name: platform
-      env:
-        - { name: MODE, value: cluster }
-        - { name: ENVIRONMENT, value: local }
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: argocd
-  syncPolicy:
-    automated: { prune: true, selfHeal: true }
-EOF
+  k apply -f "$here/templates/root-application.yaml" >/dev/null
   synced "$platform_commit" "$app_commit"
   grafana_for_claude
   kubernetes_for_claude

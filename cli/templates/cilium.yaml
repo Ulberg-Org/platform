@@ -1,0 +1,12 @@
+# Cilium's values (the platform CLI sets hubble.enabled per the plan's networkFlows).
+ipam: { mode: kubernetes }
+operator: { replicas: 1 }
+hubble:
+  relay: { enabled: false }
+  metrics:
+    enabled: [ dns, drop, tcp, "flow:sourceContext=namespace;destinationContext=namespace", "policy:sourceContext=namespace;destinationContext=namespace" ]
+    serviceAnnotations: { prometheus.io/scrape: "true", prometheus.io/port: "9965" }
+  export:
+    static:
+      filePath: /var/run/cilium/hubble/events.log
+      allowList: [ '{"verdict":["DROPPED"]}' ] # Hubble flow filters, as JSON

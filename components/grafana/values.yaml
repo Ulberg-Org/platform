@@ -4,6 +4,7 @@ grafana.ini:
   analytics: { reporting_enabled: false, check_for_updates: false, check_for_plugin_updates: false }
   auth.anonymous: { enabled: false }
 # The three data sources, linked: from a trace to its logs and metrics, from a log line to its trace.
+# By their full names, which a machine's proxy settings leave alone (NO_PROXY: .svc; Claude's sandbox, D81).
 datasources:
   datasources.yaml:
     apiVersion: 1
@@ -11,7 +12,7 @@ datasources:
       - name: Prometheus
         uid: prometheus
         type: prometheus
-        url: http://prometheus-server
+        url: http://prometheus-server.observability.svc
         isDefault: true
         jsonData:
           # A metric's exemplar (a sample request) opens its trace in Tempo.
@@ -19,7 +20,7 @@ datasources:
       - name: Loki
         uid: loki
         type: loki
-        url: http://loki:3100
+        url: http://loki.observability.svc:3100
         jsonData:
           derivedFields:
             - name: trace
@@ -30,7 +31,7 @@ datasources:
       - name: Tempo
         uid: tempo
         type: tempo
-        url: http://tempo:3200
+        url: http://tempo.observability.svc:3200
         jsonData:
           tracesToLogsV2:
             datasourceUid: loki
