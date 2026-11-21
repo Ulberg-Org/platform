@@ -17,3 +17,10 @@ adminPassword: local-only-admin
 # So the links Grafana makes (and hands to mcp-grafana) point at its local address.
 grafana.ini:
   server: { root_url: "http://localhost:9876" }
+# Footprint (least memory, locally): a memory cap Go honours (GOMEMLIMIT, about 80% of the limit), so it gives
+# memory back instead of keeping it. Sized from use: Grafana peaks at about 520 MiB while it installs its plugins
+# at start, then runs at about 400 MiB; each sidecar at about 80 MiB.
+resources: { limits: { memory: 640Mi } }
+env: { GOMEMLIMIT: 512MiB }
+sidecar:
+  resources: { limits: { memory: 128Mi } }
