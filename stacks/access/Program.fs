@@ -108,6 +108,7 @@ let private run () =
 
                 let ciResourceGroup = config.Require "ciIdentityResourceGroup"
                 let ci = CiFederation.deploy subscriptionId ciResourceGroup plan
+                CiFederation.applyClientId ciResourceGroup |> ignore
 
                 let claudeApp =
                     ClaudeApp.deploy

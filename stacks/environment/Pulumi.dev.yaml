@@ -13,9 +13,9 @@ config:
   environment:vnet: 10.20.0.0/16
   environment:nodes: 10.20.0.0/23
   environment:database: 10.20.2.0/24
-  # D84: 2 ARM nodes, the cheapest ARM size the subscription gets here (D2ps_v6 isn't offered to us).
+  # D84: 2 ARM nodes. D2ps_v7: the subscription has vCPU quota for it here (DPSv5's is 0; v6 isn't offered).
   environment:kubernetesVersion: "1.37"
-  environment:nodeSize: Standard_D2ps_v5
+  environment:nodeSize: Standard_D2ps_v7
   environment:nodeCount: 2
   # D85: Postgres 18 (the newest Azure offers), the smallest burstable size.
   environment:postgresVersion: "18"
