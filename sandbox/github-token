@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Prints Claude's GitHub app token (D52), minting a fresh one when it's about to expire. Docker Sandboxes runs this
-# on the developer's machine whenever a sandbox talks to GitHub (`sbx secret set github --command`), and adds the
-# token to the request on the way out, so the token itself never enters the sandbox (D78).
+# Prints Claude's GitHub app token (D52), minting a fresh one when it's about to expire. sandbox/confine.mjs
+# copies it into Claude's VM every 45 minutes (D81: the token lives in the VM, for at most an hour).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 "$here/../scripts/claude-github-token.sh" >/dev/null

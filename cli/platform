@@ -95,6 +95,9 @@ read_plan() {
   plan=$(render plan /app-repo/platform.yaml /platform/environments/local.yaml)
   app=$(jq -r .app <<<"$plan")
   cluster=$app
+  # The CLI reaches the cluster's API by the node's name (join_kind), never through a proxy the machine may have.
+  export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$cluster-control-plane"
+  export no_proxy=$NO_PROXY
 }
 
 # A source's files (NUL-separated) and where they come from: a checkout's tracked and new files, uncommitted
