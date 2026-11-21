@@ -1,0 +1,20 @@
+config:
+  azure-native:subscriptionId: 21784576-1957-4336-89d8-a6ab6b571930
+  azure-native:tenantId: e17ac17e-d8cd-4280-a4e5-94ad2bb85549
+  azure-native:location: swedencentral
+  # What shared keeps for every environment (D45, D89): its address, and the registry the cluster pulls from.
+  environment:sharedGroup: rg-platform-shared
+  environment:registryName: crplatform21784576
+  # Makes the database's name globally unique.
+  environment:namePrefix: ulberg
+  # D70, D86: the VNet, the AKS nodes' subnet, the database's (delegated to Postgres).
+  environment:vnet: 10.20.0.0/16
+  environment:nodes: 10.20.0.0/23
+  environment:database: 10.20.2.0/24
+  # D84: 2 ARM nodes, the cheapest ARM size the subscription gets here (D2ps_v6 isn't offered to us).
+  environment:kubernetesVersion: "1.37"
+  environment:nodeSize: Standard_D2ps_v5
+  environment:nodeCount: 2
+  # D85: Postgres 18 (the newest Azure offers), the smallest burstable size.
+  environment:postgresVersion: "18"
+  environment:postgresSku: Standard_B1ms
