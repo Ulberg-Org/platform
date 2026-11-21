@@ -9,6 +9,15 @@
       forEach = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
+      # The sandbox's image (platform profile) adds only what Docker's Claude sandbox image lacks (it has Docker, git,
+      # gh, make, jq). Not az: Azure is reached through a proxy on the developer's machine (D78).
+      packages = forEach (pkgs: {
+        tools = pkgs.buildEnv {
+          name = "platform-sandbox-tools";
+          paths = with pkgs; [ cosign kind kubectl kubernetes-helm yq-go pulumi ]
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.dotnetCorePackages.sdk_11_0 ];
+        };
+      });
       devShells = forEach (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [
