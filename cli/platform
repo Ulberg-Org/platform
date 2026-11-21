@@ -36,6 +36,10 @@ platform_snapshot="$state/gitops/platform"
 k() { kubectl --kubeconfig "$cli_kubeconfig" "$@"; }
 h() { helm --kubeconfig "$cli_kubeconfig" "$@"; }
 step() { printf '\n== %s\n' "$*"; }
+# Git refuses a repository another user owns, and the checkouts are the developer's while the CLI's image runs as
+# root (Docker Desktop hides that by showing shared files as root's; a Linux VM doesn't). Trusted: only the two repos
+# this run was given (its own snapshots are root's).
+git() { command git -c safe.directory="$app_repo" -c safe.directory="$platform_root" "$@"; }
 
 # The renderer, from its image (the same one Argo CD's plugin runs), reading the platform's snapshot and the app
 # repo read-only. Both are paths on the host, which the host's Docker can mount wherever the CLI runs.
@@ -99,7 +103,7 @@ files_of() {
   if git -C "$1" rev-parse 2>/dev/null; then
     git -C "$1" ls-files -z -co --exclude-standard | while IFS= read -r -d '' f; do [ -e "$1/$f" ] && printf '%s\0' "$f"; done
   else
-    (cd "$1" && find . -type f ! -name release.env -print0)
+    (cd "$1" && find . -type f ! -name release.env ! -path './.git/*' -print0)
   fi
 }
 origin_of() {
@@ -334,6 +338,7 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   disableDefaultCNI: true # Cilium instead, which enforces network rules
+  apiServerPort: 9877 # fixed, next to the app and Grafana, so Claude's sandbox can be allowed exactly it (D80)
 nodes:
   - role: control-plane
     image: $KIND_NODE_IMAGE
