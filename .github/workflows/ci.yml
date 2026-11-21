@@ -78,6 +78,8 @@ jobs:
         run: .github/scripts/test_due_environments.sh
       - name: Test the teardown guard (guard.yml)
         run: .github/scripts/test_check_teardown_use.sh
+      - name: Test releasing a cancelled run's lock (start, destroy)
+        run: .github/scripts/test_release_stale_lock.sh
       - name: Test the renderer (D60, D62)
         run: dotnet run --project tests/Renderer.Tests -c Release --no-build
       - name: Platform charts are the packages their digests pin (D65)

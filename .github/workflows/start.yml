@@ -51,11 +51,20 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      # Only installs the CLI (no command).
+      - uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
+        with:
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+      - name: Release a lock a cancelled run left
+        working-directory: stacks/environment
+        run: pulumi login "$PULUMI_BACKEND_URL" && ../../.github/scripts/release_stale_lock.sh "${{ inputs.environment }}"
       - uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
         with:
           command: up
           stack-name: ${{ inputs.environment }}
           work-dir: stacks/environment
+          # Reconciles the state with Azure first, in case a cancelled run left it half-written.
+          refresh: true
           upsert: true
           secrets-provider: azurekeyvault://kv-platform-21784576.vault.azure.net/keys/pulumi
           pulumi-version: ${{ env.PULUMI_VERSION }}
