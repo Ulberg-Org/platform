@@ -22,8 +22,6 @@ provision:
       if systemctl cat docker >/dev/null 2>&1; then systemctl restart docker; fi
       # git asks the proxy without its credentials first, and is cut off; send them at once.
       git config --system http.proxyAuthMethod basic
-      git config --system user.name "ulberg-claude[bot]"
-      git config --system user.email "358816865+ulberg-claude[bot]@users.noreply.github.com"
       dpkg -s gh make jq >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq gh make jq; }
   - mode: user
     script: |
