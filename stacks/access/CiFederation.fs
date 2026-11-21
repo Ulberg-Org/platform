@@ -5,6 +5,7 @@ module Platform.Access.CiFederation
 open Pulumi
 open Pulumi.FSharp
 open Pulumi.AzureNative.ManagedIdentity
+open Platform.Access.People
 open Platform.Access.Desired
 
 let private credential
@@ -52,3 +53,23 @@ let deploy (subscriptionId: string) (resourceGroup: string) (plan: Plan) : Feder
                 :: made)
             []
         |> List.rev)
+
+/// The apply identity's client id, as a repo variable, for every platform job that may sign in as it (the `dev`
+/// and `teardown` environments). An identifier, not a credential: the federated credentials decide who gets in.
+let applyClientId (resourceGroup: string) =
+    let identity =
+        GetUserAssignedIdentity.Invoke(
+            GetUserAssignedIdentityInvokeArgs(
+                ResourceGroupName = resourceGroup,
+                ResourceName = CiIdentity.name ApplyIdentity
+            )
+        )
+
+    Pulumi.Github.ActionsVariable(
+        "platform-AZURE_CLIENT_ID",
+        Pulumi.Github.ActionsVariableArgs(
+            Repository = RepoName.value RepoName.platform,
+            VariableName = "AZURE_CLIENT_ID",
+            Value = io (identity.Apply(fun i -> i.ClientId))
+        )
+    )
