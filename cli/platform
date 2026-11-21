@@ -349,6 +349,8 @@ kind: CiliumNetworkPolicy
 metadata: { name: platform-proxy, namespace: $ns }
 spec:
   endpointSelector: {}
+  # Only adds the proxy: on its own, a first policy would deny the namespace everything else.
+  enableDefaultDeny: { egress: false, ingress: false }
   egress:
     - toCIDR: [ ${address%:*}/32 ]
       toPorts: [ { ports: [ { port: "${address##*:}", protocol: TCP } ] } ]
