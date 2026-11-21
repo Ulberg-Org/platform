@@ -1,7 +1,7 @@
-# Claude's sandbox image (D76–D79): Docker's own Claude sandbox image (with its Docker engine) plus exactly the tools in the repo's flake
+# Claude's sandbox image (D76–D79): Docker's Claude sandbox image (with its own Docker) plus the tools in the repo's flake
 # (`packages.tools`), built by Nix and copied in with only what they depend on (least footprint). Built by
-# sandbox/sandbox from the repo it's for, which is the build context:
-#   docker build -f <platform repo>/sandbox/Dockerfile <app or platform repo>
+# sandbox/sandbox from the flake of the repo it's for (the build context is just flake.nix and flake.lock):
+#   docker build -f sandbox/Dockerfile <folder with the flake>
 
 FROM nixos/nix:2.34.0@sha256:b9c9611c8530fa8049a1215b20638536e1e71dcaf85212e47845112caf3adeea AS tools
 WORKDIR /src

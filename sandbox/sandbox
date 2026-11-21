@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Starts Claude in a sandbox (D76–D78), run by the developer on their own machine:
 #
-#   sandbox <app repo>     the app profile: that repo only, with `make up` inside (the platform CLI image)
+#   sandbox <app repo>     the app profile: that repo only; it reads the developer's `make up` through Grafana (D80)
 #   sandbox platform       the platform profile: this repo, for infra developers only (access/people.yaml)
 #
-# The sandbox is Claude's, not the developer's: a private clone of the repo (never the developer's working copy), no
-# home folder, keys or logins of theirs, deny-by-default network (sandbox/setup.sh). Its GitHub access is Claude's
+# The sandbox is Claude's, not the developer's: the repo folder and nothing else of theirs (no home folder, keys or
+# logins), deny-by-default network (sandbox/setup.sh). Its GitHub access is Claude's
 # app token, which sbx adds to requests from the host (sandbox/github-token), so the token never enters it.
 set -euo pipefail
 
@@ -31,18 +31,24 @@ else
   profile=app
 fi
 
-# Named after Claude's identity (D41) and the repo; `make up` needs about 7 GiB, the rest is Claude and the build.
+# Named after Claude's identity (D41) and the repo. The cluster runs on the developer's machine (D80), so the
+# sandbox only needs room for Claude, the builds and the tests.
 name="$person-agent-$profile-$(basename "$repo")"
 # The image: Docker's Claude image plus the repo's flake tools (D79), as an sbx template.
 image="ulberg/claude-sandbox-$(basename "$repo"):local"
-docker build -q -f "$here/Dockerfile" -t "$image" "$repo" >/dev/null
+# Only the flake goes to the build, not the repo (nor its .local).
+context=$(mktemp -d)
+cp "$repo/flake.nix" "$repo/flake.lock" "$context/"
+docker build -q -f "$here/Dockerfile" -t "$image" "$context" >/dev/null
+rm -rf "$context"
 docker image save "$image" | sbx template load - >/dev/null 2>&1 || {
   tar=$(mktemp); docker image save -o "$tar" "$image"; sbx template load "$tar" >/dev/null; rm -f "$tar"; }
 if ! sbx ls 2>/dev/null | awk 'NR > 1 {print $1}' | grep -qx "$name"; then
-  sbx create --name "$name" --template "$image" --clone --cpus 4 --memory 10g claude "$repo"
+  sbx create --name "$name" --template "$image" --cpus 2 --memory 4g claude "$repo"
 fi
 sbx secret set github --sandbox "$name" --command "$here/github-token" >/dev/null
-# kind's kubelet needs the kernel log device, which the sandbox's micro-VM doesn't create (it's made at runtime,
-# so on every start).
-sbx exec "$name" -- sudo sh -c '[ -e /dev/kmsg ] || mknod -m 600 /dev/kmsg c 1 11'
+# Of the developer's machine, only Grafana and the gateway of their `make up` (D80); the sandbox calls them
+# host.docker.internal, which its proxy checks as the host's localhost.
+sbx policy ls "$name" --wide | grep -q " localhost:9876$" ||
+  sbx policy allow network localhost:9876,localhost:9875 --sandbox "$name" >/dev/null
 exec sbx run "$name"

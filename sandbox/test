@@ -14,7 +14,7 @@ check() { # description, command that must FAIL inside the sandbox
 }
 check "the developer's SSH keys aren't there" 'ls ~/.ssh/id_* || ls /Users/*/.ssh'
 check "no SSH agent" '[ -n "${SSH_AUTH_SOCK:-}" ]'
-check "only the repo's clone of the developer's home folder" \
+check "of the developer's home folder, only the repo" \
   'ls /Users/*/ | grep -vx Github | grep .'
 check "a host that isn't on the allowlist is blocked" 'curl -sf -m 8 -o /dev/null https://example.com'
 check "the GitHub token isn't in the sandbox (only the proxy's placeholder)" \
@@ -23,4 +23,8 @@ check "the developer's GitHub account isn't usable (only the app's token)" \
   'gh api user'
 check "the developer's Docker isn't reachable (only the sandbox's own)" \
   'docker -H unix:///Users/$(ls /Users | head -1)/.docker/run/docker.sock ps'
+check "of the developer's machine, nothing but Grafana and the gateway (D80): not Postgres" \
+  'curl -s -m 5 -o /dev/null -w "%{http_code}" http://host.docker.internal:5432 | grep -vx 403'
+check "nor the cluster's Kubernetes API" \
+  'port=$(grep -m1 -o "127.0.0.1:[0-9]*" .local/kubeconfig-claude | cut -d: -f2); curl -s -k -m 5 -o /dev/null -w "%{http_code}" https://host.docker.internal:$port | grep -vx 403'
 exit $failed
