@@ -47,7 +47,8 @@ limactl list -q | grep -qx "$name" ||
   limactl create --name "$name" --mount-none --tty=false "$here/lima.yaml" >/dev/null
 if [ "$(limactl list "$name" --format '{{.Status}}')" != Running ]; then
   echo "Starting $name (the first time about 5 minutes: Docker, Claude Code, Nix)" >&2
-  nohup node "$here/confine.mjs" "$name" >"$HOME/.lima/$name/confine.log" 2>&1 &
+  # Nothing in there may ask the developer anything (stdin closed).
+  nohup node "$here/confine.mjs" "$name" </dev/null >"$HOME/.lima/$name/confine.log" 2>&1 &
   # Ready when Lima has run the template's setup (lima.yaml provision), not when SSH answers.
   until limactl shell --workdir / "$name" -- test -e /run/lima-boot-done 2>/dev/null; do
     kill -0 $! 2>/dev/null || { tail -5 "$HOME/.lima/$name/confine.log" >&2; exit 1; }
@@ -74,7 +75,9 @@ vm 'mkdir -p ~/.claude && f=~/.claude/settings.json && { [ -s $f ] || echo "{}" 
 # The platform repo next to the app's too, as on the developer's machine: Claude publishes with its
 # scripts/claude-push.sh.
 for repo in "${repos[@]}" platform; do
-  vm "[ -d ~/$repo ] || git clone -q https://github.com/Ulberg-Org/$repo ~/$repo"
+  # A repo that doesn't exist fails here, rather than git asking for a login.
+  vm "[ -d ~/$repo ] || GIT_TERMINAL_PROMPT=0 git clone -q https://github.com/Ulberg-Org/$repo ~/$repo" ||
+    { echo "Ulberg-Org/$repo isn't a repo Claude's GitHub app can read" >&2; exit 1; }
 done
 # The profile's repos' tools (D79), from their flakes.
 vm "grep -q flakes /etc/nix/nix.conf || echo 'experimental-features = nix-command flakes' | sudo tee -a /etc/nix/nix.conf >/dev/null"
