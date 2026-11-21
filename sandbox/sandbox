@@ -79,13 +79,12 @@ for repo in "${repos[@]}" platform; do
   vm "[ -d ~/$repo ] || GIT_TERMINAL_PROMPT=0 git clone -q https://github.com/Ulberg-Org/$repo ~/$repo" ||
     { echo "Ulberg-Org/$repo isn't a repo Claude's GitHub app can read" >&2; exit 1; }
 done
-# The profile's repos' tools (D79), from their flakes.
+# The profile's own tools (D79), from its repo's flake: the platform's include an app's (.NET, cosign), and both
+# at once would clash.
 vm "grep -q flakes /etc/nix/nix.conf || echo 'experimental-features = nix-command flakes' | sudo tee -a /etc/nix/nix.conf >/dev/null"
-for repo in "${repos[@]}"; do
-  vm "[ ! -f ~/$repo/flake.nix ] ||
-    nix profile list --json | jq -e '[.elements[].originalUrl] | any(endswith(\"/$repo\"))' >/dev/null ||
-    nix profile add ~/$repo#tools"
-done
+vm "[ ! -f ~/${repos[0]}/flake.nix ] ||
+  nix profile list --json | jq -e '[.elements[].originalUrl] | any(endswith(\"/${repos[0]}\"))' >/dev/null ||
+  nix profile add ~/${repos[0]}#tools"
 
 echo "Claude's sandbox $name is running: refused hosts are in ~/.lima/$name/confine.log" >&2
 # Attach when started from a terminal; Claude starting it for itself drives it with `limactl shell`.
