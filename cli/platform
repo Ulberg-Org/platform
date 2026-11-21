@@ -276,6 +276,13 @@ kubernetes_for_claude() {
   chmod 600 "$file"
 }
 
+# The files the developer and their Claude's MCP servers read belong to whoever owns the repo, not to the CLI
+# image's root (Docker Desktop shows shared files as the developer's anyway; Docker Engine on Linux doesn't).
+hand_over() {
+  [ "$(id -u)" = 0 ] || return 0
+  chown "$(stat -c %u:%g "$app_repo")" "$kubeconfig" "$state/kubeconfig-claude" "$state/grafana-claude-token"
+}
+
 down() {
   kind delete cluster --name "$cluster" 2>/dev/null || true
   docker ps -aq --filter "label=platform.app=$app" | xargs -r docker rm -f >/dev/null
@@ -487,6 +494,7 @@ EOF
   synced "$platform_commit" "$app_commit"
   grafana_for_claude
   kubernetes_for_claude
+  hand_over
 
   step "Ready"
   echo "App:     http://localhost:9875"
@@ -523,6 +531,7 @@ sync() {
   synced "$platform_commit" "$(snapshot "$app_repo" "$app")"
   grafana_for_claude
   kubernetes_for_claude
+  hand_over
 }
 
 case "$command" in
