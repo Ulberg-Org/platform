@@ -47,7 +47,8 @@ limactl list -q | grep -qx "$name" ||
   limactl create --name "$name" --mount-none --tty=false "$here/lima.yaml" >/dev/null
 if [ "$(limactl list "$name" --format '{{.Status}}')" != Running ]; then
   echo "Starting $name (the first time about 5 minutes: Docker, Claude Code, Nix)" >&2
-  nohup node "$here/confine.mjs" "$name" >"$HOME/.lima/$name/confine.log" 2>&1 &
+  # Nothing in there may ask the developer anything (stdin closed).
+  nohup node "$here/confine.mjs" "$name" </dev/null >"$HOME/.lima/$name/confine.log" 2>&1 &
   # Ready when Lima has run the template's setup (lima.yaml provision), not when SSH answers.
   until limactl shell --workdir / "$name" -- test -e /run/lima-boot-done 2>/dev/null; do
     kill -0 $! 2>/dev/null || { tail -5 "$HOME/.lima/$name/confine.log" >&2; exit 1; }
@@ -71,18 +72,24 @@ printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n    user: ulb
 vm 'mkdir -p ~/.claude && f=~/.claude/settings.json && { [ -s $f ] || echo "{}" >$f; } &&
   jq --arg profile "$HOME/.config/gh-claude" --slurpfile env /dev/stdin \
     ".env += \$env[0] + {GH_CONFIG_DIR: \$profile}" $f >$f.new && mv $f.new $f' <"$here/claude-env.json"
+# The work is the developer's, done by their Claude: they're its author, the app its committer (claude-env.json),
+# as on their machine; claude-push.sh credits the author.
+login=$(yq ".people.$person.github" "$people")
+id=$(gh api "users/$login" --jq .id)
+vm "git config --global user.name '$login' && git config --global user.email '$id+$login@users.noreply.github.com'"
 # The platform repo next to the app's too, as on the developer's machine: Claude publishes with its
 # scripts/claude-push.sh.
 for repo in "${repos[@]}" platform; do
-  vm "[ -d ~/$repo ] || git clone -q https://github.com/Ulberg-Org/$repo ~/$repo"
+  # A repo that doesn't exist fails here, rather than git asking for a login.
+  vm "[ -d ~/$repo ] || GIT_TERMINAL_PROMPT=0 git clone -q https://github.com/Ulberg-Org/$repo ~/$repo" ||
+    { echo "Ulberg-Org/$repo isn't a repo Claude's GitHub app can read" >&2; exit 1; }
 done
-# The profile's repos' tools (D79), from their flakes.
+# The profile's own tools (D79), from its repo's flake: the platform's include an app's (.NET, cosign), and both
+# at once would clash.
 vm "grep -q flakes /etc/nix/nix.conf || echo 'experimental-features = nix-command flakes' | sudo tee -a /etc/nix/nix.conf >/dev/null"
-for repo in "${repos[@]}"; do
-  vm "[ ! -f ~/$repo/flake.nix ] ||
-    nix profile list --json | jq -e '[.elements[].originalUrl] | any(endswith(\"/$repo\"))' >/dev/null ||
-    nix profile add ~/$repo#tools"
-done
+vm "[ ! -f ~/${repos[0]}/flake.nix ] ||
+  nix profile list --json | jq -e '[.elements[].originalUrl] | any(endswith(\"/${repos[0]}\"))' >/dev/null ||
+  nix profile add ~/${repos[0]}#tools"
 
 echo "Claude's sandbox $name is running: refused hosts are in ~/.lima/$name/confine.log" >&2
 # Attach when started from a terminal; Claude starting it for itself drives it with `limactl shell`.
