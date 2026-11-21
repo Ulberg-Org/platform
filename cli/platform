@@ -322,6 +322,20 @@ SQL
     --dry-run=client -o yaml | k apply -f - >/dev/null
 }
 
+# When the developer's machine reaches the internet only through a proxy (Claude's sandbox, D81, or a company
+# proxy), the components that download from it (Argo CD's charts, Grafana's plugins) get it too: HTTPS only, so
+# the cluster's own traffic, which is plain HTTP, never goes there. Without a proxy there is no ConfigMap, and the
+# components' optional reference to it does nothing.
+egress_proxy() {
+  [ -n "${HTTPS_PROXY:-}" ] || return 0
+  local ns
+  for ns in argocd observability; do
+    k create namespace "$ns" --dry-run=client -o yaml | k apply -f - >/dev/null
+    k -n "$ns" create configmap platform-proxy --from-literal=HTTPS_PROXY="$HTTPS_PROXY" \
+      --from-literal=NO_PROXY="${NO_PROXY:-}" --dry-run=client -o yaml | k apply -f - >/dev/null
+  done
+}
+
 up() {
   wait=10m
   mkdir -p "$state"
@@ -412,6 +426,7 @@ EOF
   k -n gitops rollout status deployment/git --timeout=5m >/dev/null
 
   step "Argo CD and its root application (D67)"
+  egress_proxy
   # Installed from the package its digest pins (D65), checked here; Argo CD then manages it like any component.
   read -r repo chart version namespace digest <<<"$(render chart /platform argocd)"
   rm -rf "$state/charts" && mkdir -p "$state/charts"
