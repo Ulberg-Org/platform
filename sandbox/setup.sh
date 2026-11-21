@@ -15,7 +15,7 @@ allow=(
   # GitHub: code, pull requests, releases, container images.
   github.com api.github.com "**.githubusercontent.com" ghcr.io
   # Image registries the platform pulls from.
-  registry-1.docker.io auth.docker.io production.cloudflare.docker.com
+  registry-1.docker.io auth.docker.io production.cloudflare.docker.com production.cloudfront.docker.com
   mcr.microsoft.com "**.data.mcr.microsoft.com" quay.io "**.quay.io" registry.k8s.io "**.pkg.dev"
   # Packages: NuGet, npm (MCP servers), Nix (the repos' flakes, D79).
   api.nuget.org "**.nuget.org" registry.npmjs.org cache.nixos.org channels.nixos.org
@@ -23,6 +23,8 @@ allow=(
   helm.cilium.io argoproj.github.io grafana-community.github.io prometheus-community.github.io open-telemetry.github.io
   # Grafana's plugins and their storage.
   grafana.com storage.googleapis.com
+  # Sigstore, which checks the platform CLI image's signature (cosign verify).
+  tuf-repo-cdn.sigstore.dev rekor.sigstore.dev fulcio.sigstore.dev
   # Claude itself (and its web search, which runs on Anthropic's side).
   api.anthropic.com
 )

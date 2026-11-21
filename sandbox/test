@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Checks that a sandbox holds (D78, Phase 2.5's "done when"), from inside it: `sandbox/test <sandbox name>`.
+# Each check must fail for the sandbox to pass: nothing of the developer's reaches it, and it reaches nothing it
+# isn't allowed to.
+set -euo pipefail
+name=${1:?usage: sandbox/test <sandbox name>}
+failed=0
+check() { # description, command that must FAIL inside the sandbox
+  if sbx exec "$name" -- bash -lc "$2" >/dev/null 2>&1; then
+    echo "  FAIL  $1"; failed=1
+  else
+    echo "  ok    $1"
+  fi
+}
+check "the developer's SSH keys aren't there" 'ls ~/.ssh/id_* || ls /Users/*/.ssh'
+check "no SSH agent" '[ -n "${SSH_AUTH_SOCK:-}" ]'
+check "only the repo's clone of the developer's home folder" \
+  'ls /Users/*/ | grep -vx Github | grep .'
+check "a host that isn't on the allowlist is blocked" 'curl -sf -m 8 -o /dev/null https://example.com'
+check "the GitHub token isn't in the sandbox (only the proxy's placeholder)" \
+  'printenv GH_TOKEN | grep -qv sbxproxymanaged'
+check "the developer's GitHub account isn't usable (only the app's token)" \
+  'gh api user'
+check "the developer's Docker isn't reachable (only the sandbox's own)" \
+  'docker -H unix:///Users/$(ls /Users | head -1)/.docker/run/docker.sock ps'
+exit $failed

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Starts Claude in a sandbox (D76–D78), run by the developer on their own machine:
+#
+#   sandbox <app repo>     the app profile: that repo only, with `make up` inside (the platform CLI image)
+#   sandbox platform       the platform profile: this repo, for infra developers only (access/people.yaml)
+#
+# The sandbox is Claude's, not the developer's: a private clone of the repo (never the developer's working copy), no
+# home folder, keys or logins of theirs, deny-by-default network (sandbox/setup.sh). Its GitHub access is Claude's
+# app token, which sbx adds to requests from the host (sandbox/github-token), so the token never enters it.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+platform_root=$(cd "$here/.." && pwd)
+usage="usage: sandbox <app repo> | sandbox platform"
+target=${1:?$usage}
+
+# Who is asking: the developer's own GitHub login, looked up in access/people.yaml.
+login=$(gh api user --jq .login)
+person=$(yq ".people | to_entries[] | select(.value.github == \"$login\") | .key" "$platform_root/access/people.yaml")
+[ -n "$person" ] || { echo "$login isn't in access/people.yaml" >&2; exit 1; }
+
+if [ "$target" = platform ]; then
+  # The platform profile: only for infra developers (D77).
+  yq -e ".groups.infra-developers[] | select(. == \"$person\")" "$platform_root/access/people.yaml" >/dev/null ||
+    { echo "$person isn't an infra developer (access/people.yaml), so no platform profile" >&2; exit 1; }
+  profile=platform
+  repo=$platform_root
+else
+  repo=$(cd "$target" && pwd)
+  [ -f "$repo/platform.yaml" ] || { echo "$repo has no platform.yaml: not an app repo" >&2; exit 1; }
+  profile=app
+fi
+
+# Named after Claude's identity (D41) and the repo; `make up` needs about 7 GiB, the rest is Claude and the build.
+name="$person-agent-$profile-$(basename "$repo")"
+# The image: Docker's Claude image plus the repo's flake tools (D79), as an sbx template.
+image="ulberg/claude-sandbox-$(basename "$repo"):local"
+docker build -q -f "$here/Dockerfile" -t "$image" "$repo" >/dev/null
+docker image save "$image" | sbx template load - >/dev/null 2>&1 || {
+  tar=$(mktemp); docker image save -o "$tar" "$image"; sbx template load "$tar" >/dev/null; rm -f "$tar"; }
+if ! sbx ls 2>/dev/null | awk 'NR > 1 {print $1}' | grep -qx "$name"; then
+  sbx create --name "$name" --template "$image" --clone --cpus 4 --memory 10g claude "$repo"
+fi
+sbx secret set github --sandbox "$name" --command "$here/github-token" >/dev/null
+# kind's kubelet needs the kernel log device, which the sandbox's micro-VM doesn't create (it's made at runtime,
+# so on every start).
+sbx exec "$name" -- sudo sh -c '[ -e /dev/kmsg ] || mknod -m 600 /dev/kmsg c 1 11'
+exec sbx run "$name"

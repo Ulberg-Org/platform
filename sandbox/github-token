@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Prints Claude's GitHub app token (D52), minting a fresh one when it's about to expire. Docker Sandboxes runs this
+# on the developer's machine whenever a sandbox talks to GitHub (`sbx secret set github --command`), and adds the
+# token to the request on the way out, so the token itself never enters the sandbox (D78).
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+"$here/../scripts/claude-github-token.sh" >/dev/null
+GH_CONFIG_DIR="$HOME/.config/gh-claude" gh auth token
