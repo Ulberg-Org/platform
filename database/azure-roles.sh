@@ -1,7 +1,9 @@
 #!/bin/sh
 # Applies an app's database roles in Azure (D85), run by the environment's bootstrap Job as the server's Entra
 # admin, through workload identity: swaps the pod's projected token for an Entra token for Postgres, then runs
-# /job/roles.sql. Retries the swap for a few minutes: a new federation takes a while to reach Entra.
+# /job/roles.sql in the app's database and /job/azure.sql in `postgres`, where Azure's Entra functions
+# (pgaadauth_*) live; roles are server-wide. Each is one transaction, so a failure leaves nothing half-done and a
+# retry starts clean. Retries the swap for a few minutes: a new federation takes a while to reach Entra.
 set -eu
 scope=https%3A%2F%2Fossrdbms-aad.database.windows.net%2F.default
 assertion_type=urn%3Aietf%3Aparams%3Aoauth%3Aclient-assertion-type%3Ajwt-bearer
@@ -16,5 +18,7 @@ for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
   sleep 15
 done
 [ -n "$token" ] || { echo "no Entra token for Postgres" >&2; exit 1; }
-PGPASSWORD=$token psql -v ON_ERROR_STOP=1 -q -f /job/roles.sql
+export PGPASSWORD=$token
+psql -v ON_ERROR_STOP=1 -q --single-transaction -f /job/roles.sql
+psql -v ON_ERROR_STOP=1 -q --single-transaction -d postgres -f /job/azure.sql
 echo "roles applied to $PGDATABASE"

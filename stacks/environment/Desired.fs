@@ -155,6 +155,6 @@ module AppDatabase =
     let serviceAccount (d: AppDatabase) =
         $"system:serviceaccount:{d.app}:{d.service}"
 
-    /// The shared roles (database/roles.sql), then who signs in as them in Azure (database/azure.sql).
-    let rolesSql (roles: string) (azure: string) (environment: string) (d: AppDatabase) =
-        $"{roles}\n{azure}".Replace("@db@", d.name).Replace("@backend@", identity environment d)
+    /// The database's SQL (database/roles.sql, database/azure.sql) filled in for the app.
+    let fill (environment: string) (d: AppDatabase) (sql: string) =
+        sql.Replace("@db@", d.name).Replace("@backend@", identity environment d)

@@ -1,4 +1,5 @@
--- In Azure (D69, D75, D85) Entra identities and groups sign in, each holding one role: the backend's workload
+-- In Azure (D69, D75, D85), run in the `postgres` database (Azure's pgaadauth functions are there; roles are
+-- server-wide). Entra identities and groups sign in, each holding one role: the backend's workload
 -- identity and the platform leads (platform-write, through PIM) read and write; developers, infra developers and
 -- every Claude agent read. A member signs in with the group's name and their own Entra token. Role settings
 -- don't pass to members, so the read-only ones get them too.
