@@ -20,7 +20,13 @@ git fetch -q origin "$base"
 published=$(gh api "repos/$repo/git/ref/heads/$branch" --jq .object.sha 2>/dev/null) || published=""
 parent=${published:-$(git rev-parse "origin/$base")}
 git fetch -q origin "$parent"
-[ -n "$(git diff --no-renames --name-only "$parent" HEAD)" ] || { echo "Nothing to publish" >&2; exit 1; }
+# When origin/<base> was merged in locally, the published commit records it as a second parent, so GitHub sees
+# the branch as up to date with <base> rather than as changing the same lines.
+merged=()
+git merge-base --is-ancestor "origin/$base" HEAD && ! git merge-base --is-ancestor "origin/$base" "$parent" &&
+  merged=("$(git rev-parse "origin/$base")")
+[ -n "$(git diff --no-renames --name-only "$parent" HEAD)" ] || [ ${#merged[@]} -gt 0 ] ||
+  { echo "Nothing to publish" >&2; exit 1; }
 
 # One tree entry per changed file: new content as a blob, or null to delete it.
 entries=$(git diff --no-renames --name-status "$parent" HEAD | while IFS=$'\t' read -r status path; do
@@ -42,7 +48,8 @@ tree=$(jq -n --arg b "$base_tree" --argjson e "$entries" '{base_tree: $b, tree: 
 author=$(git log -1 --format='%an <%ae>' HEAD)
 message="$(git log --reverse --format=%B "$parent..HEAD" | grep -v '^Co-authored-by: ' | cat -s)
 Co-authored-by: $author"
-commit=$(jq -n --arg m "$message" --arg t "$tree" --arg p "$parent" '{message: $m, tree: $t, parents: [$p]}' |
+commit=$(jq -n --arg m "$message" --arg t "$tree" --args '{message: $m, tree: $t, parents: $ARGS.positional}' \
+    "$parent" "${merged[@]}" |
   gh api "repos/$repo/git/commits" --input - --jq .sha)
 
 if [ -n "$published" ]; then
