@@ -9,9 +9,6 @@ configs:
 repoServer:
   resources: { limits: { memory: 384Mi } }
   env: [ { name: GOMEMLIMIT, value: 300MiB } ]
-  # The machine's proxy for downloading charts, if it has one (the platform CLI's egress_proxy).
-  envFrom:
-    - configMapRef: { name: platform-proxy, optional: true }
   extraContainers:
     - name: platform
       image: platform/renderer:dev
@@ -32,6 +29,9 @@ repoServer:
   volumes:
     - { name: argocd-cmp-cm, configMap: { name: argocd-cmp-cm } }
     - { name: cmp-tmp, emptyDir: {} }
+  # The machine's proxy for downloading charts, if it has one (the platform CLI's egress_proxy).
+  envFrom:
+    - configMapRef: { name: platform-proxy, optional: true }
 # Footprint (least memory, locally): a memory cap Go honours (GOMEMLIMIT, about 80% of the limit), so it gives memory back instead of keeping it.
 controller:
   resources: { limits: { memory: 512Mi } }
