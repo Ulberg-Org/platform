@@ -69,7 +69,7 @@ const renewToken = () => {
   try {
     const token = execFileSync(`${here}github-token`, { encoding: 'utf8' }).trim()
     execFileSync('limactl', ['shell', '--workdir', '/', instance, '--', 'sh', '-c',
-      'mkdir -p ~/.config/gh && cat >~/.config/gh/hosts.yml && chmod 600 ~/.config/gh/hosts.yml && gh auth setup-git'],
+      'mkdir -p ~/.config/gh-claude && cat >~/.config/gh-claude/hosts.yml && chmod 600 ~/.config/gh-claude/hosts.yml'],
       { input: `github.com:\n    oauth_token: ${token}\n    git_protocol: https\n    user: ulberg-claude[bot]\n` })
   } catch (error) {
     console.error(`GitHub token not renewed: ${error.message}`)
