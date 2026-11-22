@@ -1,0 +1,9 @@
+{
+  "deployment": {
+    "resources": [
+      {
+        "urn": "urn:pulumi:dev::environment::pulumi:pulumi:Stack::environment-dev"
+      }
+    ]
+  }
+}

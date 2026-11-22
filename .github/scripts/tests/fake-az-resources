@@ -1,7 +1,28 @@
 #!/usr/bin/env bash
-# A stand-in for `az resource list` and `az resource delete --ids` in test_empty_group.sh. The group's resources
-# are the lines of $RESOURCES; `vnet` can only go once `aks` has (a subnet in use), and `stuck` never goes.
+# A stand-in for `az resource list|delete` and `az monitor diagnostic-settings list|delete` in
+# test_empty_group.sh. The group's resources are the lines of $RESOURCES, their diagnostic settings the
+# "<resource> <setting>" lines of $SETTINGS; `vnet` can only go once `aks` has (a subnet in use), and `stuck`
+# never goes. Deleting a resource leaves its settings behind, as Azure does.
 set -euo pipefail
+option() { # the value after a flag: option --resource "$@"
+  local flag=$1
+  shift
+  while [ $# -gt 0 ]; do
+    [ "$1" = "$flag" ] && { echo "$2"; return; }
+    shift
+  done
+}
+if [ "$1" = monitor ]; then
+  resource=$(option --resource "$@")
+  case "$3" in
+    list) awk -v r="$resource" '$1 == r { print $2 }' "$SETTINGS" ;;
+    delete)
+      awk -v r="$resource" -v n="$(option --name "$@")" '!($1 == r && $2 == n)' "$SETTINGS" >"$SETTINGS.new"
+      mv "$SETTINGS.new" "$SETTINGS"
+      ;;
+  esac
+  exit 0
+fi
 case "$2" in
   list) cat "$RESOURCES" ;;
   delete)

@@ -69,6 +69,8 @@ jobs:
           work-dir: stacks/environment
           # Reconciles the state with Azure first, in case a cancelled run left it half-written.
           refresh: true
+          # Carries on with whatever doesn't depend on a failure, so one run shows every independent one (D98).
+          continue-on-error: true
           upsert: true
           secrets-provider: azurekeyvault://kv-platform-21784576.vault.azure.net/keys/pulumi
           pulumi-version: ${{ env.PULUMI_VERSION }}

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# A stand-in for `pulumi stack export` in check_leftovers.sh: the stack's state from $FIXTURE/state.json.
+set -euo pipefail
+[ "$1 $2" = "stack export" ] || { echo "fake-pulumi-leftovers: no stand-in for $*" >&2; exit 1; }
+cat "$FIXTURE/state.json"
