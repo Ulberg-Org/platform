@@ -95,7 +95,7 @@ let private run () =
 
         let signals = AzureSignals.deploy stack vnet postgres.server
         let rolesJobs = Bootstrap.deploy stack aks postgres bootstrap
-        let argocd = Bootstrap.argocd stack aks (config.Require "repo")
+        Bootstrap.argocd stack aks (config.Require "repo") |> ignore
 
         // 4. Report
         Log.Info(
@@ -115,7 +115,6 @@ let private run () =
                 "eventHubs", signals.hubs.Name :> obj
                 "serverLogs", signals.serverLogs.Id :> obj
                 "activityLog", signals.activityLog.Id :> obj
-                "argocd", argocd.Stdout :> obj
             ]
 
 [<EntryPoint>]
