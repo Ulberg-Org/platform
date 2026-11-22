@@ -20,7 +20,11 @@ known=$(cd "$here/stacks/environment" && pulumi stack export --stack "$environme
 resources=$(az resource list --resource-group "$group" --query "[].id" -o tsv)
 in_azure=$({
   echo "$resources"
-  for id in $resources; do az monitor diagnostic-settings list --resource "$id" --query "[].id" -o tsv; done
+  # Some types have no diagnostic settings (identities, DNS links: ResourceTypeNotSupported). A sign-in problem
+  # would already have failed `az resource list` above.
+  for id in $resources; do
+    az monitor diagnostic-settings list --resource "$id" --query "[].id" -o tsv 2>/dev/null || true
+  done
   az monitor diagnostic-settings subscription list --query "value[?name=='telemetry-$environment'].id" -o tsv
 } | grep -v '^$' | lower | sort -u)
 
