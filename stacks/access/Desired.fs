@@ -595,14 +595,13 @@ module AzureEnvironment =
     let parse (fileName: string) (yaml: string) : Result<AzureEnvironment, string> =
         let found = location.Match yaml
 
-        if found.Success then
-            Ok
-                {
-                    name = fileName.Substring("Pulumi.".Length, fileName.Length - "Pulumi..yaml".Length)
-                    location = found.Groups[1].Value
-                }
-        else
-            Error $"stacks/environment/{fileName}: azure-native:location is missing"
+        found.Success
+        |> Result.requireTrue $"stacks/environment/{fileName}: azure-native:location is missing"
+        |> Result.map (fun () ->
+            {
+                name = fileName.Substring("Pulumi.".Length, fileName.Length - "Pulumi..yaml".Length)
+                location = found.Groups[1].Value
+            })
 
     let group (environment: AzureEnvironment) = $"rg-{environment.name}"
 

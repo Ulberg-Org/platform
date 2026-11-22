@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# A stand-in for the `gh` calls scripts/claude-push.sh makes, in test_claude_push.sh: GitHub's git database API
+# done with git's plumbing on the bare repo $ORIGIN. Faults: $UPLOAD_FAILS makes blob uploads return nothing;
+# $LOSE makes the tree endpoint drop that path, so the published commit differs from the local one.
+set -euo pipefail
+git() { command git -C "$ORIGIN" "$@"; }
+[ "$1" = repo ] && { echo '{"nameWithOwner":"owner/repo"}' | jq -r .nameWithOwner; exit 0; }
+shift
+path="" expression=. fields=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -X | --input) shift 2 ;;
+    --silent) shift ;;
+    --jq) expression=$2; shift 2 ;;
+    -f) fields+=("$2"); shift 2 ;;
+    *) path=${1#repos/owner/repo/}; shift ;;
+  esac
+done
+field() { printf '%s\n' "${fields[@]}" | sed -n "s/^$1=//p"; }
+
+case "$path" in
+  git/ref/heads/*)
+    sha=$(git rev-parse -q --verify "refs/heads/${path#git/ref/heads/}") || { echo '{"message":"Not Found"}'; exit 1; }
+    jq -n --arg s "$sha" '{object: {sha: $s}}' ;;
+  git/blobs)
+    [ -z "${UPLOAD_FAILS:-}" ] || exit 0
+    jq -r .content | base64 -d | git hash-object -w --stdin | jq -R '{sha: .}' ;;
+  git/commits/*)
+    jq -n --arg t "$(git rev-parse "${path#git/commits/}^{tree}")" '{tree: {sha: $t}}' ;;
+  git/trees)
+    input=$(cat)
+    GIT_INDEX_FILE=$(mktemp -u)
+    export GIT_INDEX_FILE
+    git read-tree "$(jq -r .base_tree <<<"$input")"
+    # A null sha (or the lost path) removes the file: mode 0 in --index-info, which needs no work tree.
+    jq -r --arg lose "${LOSE:-}" '.tree[] | if .sha == null or .path == $lose
+      then "0 0000000000000000000000000000000000000000\t\(.path)" else "\(.mode) \(.sha)\t\(.path)" end' \
+      <<<"$input" | git update-index --index-info
+    jq -n --arg s "$(git write-tree)" '{sha: $s}'
+    rm -f "$GIT_INDEX_FILE" ;;
+  git/commits)
+    input=$(cat)
+    parents=()
+    for parent in $(jq -r '.parents[]' <<<"$input"); do parents+=(-p "$parent"); done
+    sha=$(jq -r .message <<<"$input" | git commit-tree "$(jq -r .tree <<<"$input")" "${parents[@]}")
+    jq -n --arg s "$sha" '{sha: $s}' ;;
+  git/refs/heads/*) git update-ref "refs/heads/${path#git/refs/heads/}" "$(field sha)" ;;
+  git/refs) git update-ref "$(field ref)" "$(field sha)" ;;
+  commits/*) echo '{"commit": {"verification": {"verified": true}}}' ;;
+  *) echo "fake-gh: no stand-in for $path" >&2; exit 1 ;;
+esac | jq -r "$expression"
