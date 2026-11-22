@@ -411,8 +411,10 @@ let private run () =
                 CustomResourceOptions(DeletedWith = database, DependsOn = inputList (List.map input settings))
             )
 
-        // Azure's own signals for our telemetry (D97): the environment's Event Hub, which Alloy reads into Loki in
-        // Phase 5. Standard, for the Kafka endpoint Alloy reads. Reachable only from the nodes' subnet (its service
+        // Azure's own signals for our telemetry (D97): the environment's Event Hubs namespace, which Alloy reads into
+        // Loki in Phase 5. Azure Monitor creates its hubs there itself, one per log category (insights-logs-…,
+        // insights-activity-logs), so none races the namespace's provisioning. Standard, for the Kafka endpoint Alloy
+        // reads. Reachable only from the nodes' subnet (its service
         // endpoint) and by Azure's trusted services, which is how Azure Monitor streams into a closed hub; Azure
         // refuses Deny without a network rule unless public access is off entirely (D97).
         let hubs =
@@ -429,23 +431,6 @@ let private run () =
                         ),
                     MinimumTlsVersion = "1.2"
                 )
-            )
-
-        let hub =
-            EventHub.EventHub(
-                Telemetry.hub,
-                EventHub.EventHubArgs(
-                    ResourceGroupName = groupName,
-                    NamespaceName = hubs.Name,
-                    EventHubName = Telemetry.hub,
-                    PartitionCount = 1.0,
-                    RetentionDescription =
-                        EventHub.Inputs.RetentionDescriptionArgs(
-                            CleanupPolicy = EventHub.CleanupPolicyRetentionDescription.Delete,
-                            RetentionTimeInHours = 24.0
-                        )
-                ),
-                CustomResourceOptions(DeletedWith = hubs)
             )
 
         let hubNetwork =
@@ -471,7 +456,7 @@ let private run () =
                 CustomResourceOptions(DeletedWith = hubs)
             )
 
-        // Azure Monitor streams with the namespace's own rule (it needs Manage, Send and Listen).
+        // Azure Monitor streams with the namespace's own rule (Manage, Send and Listen: Manage creates the hubs).
         let sendTo =
             hubs.Id.Apply(fun id -> $"{id}/authorizationRules/RootManageSharedAccessKey")
 
@@ -486,7 +471,6 @@ let private run () =
                     Name = "telemetry",
                     ResourceUri = database.Id,
                     EventHubAuthorizationRuleId = sendTo,
-                    EventHubName = hub.Name,
                     Logs =
                         inputList
                             [
@@ -505,7 +489,6 @@ let private run () =
                 Monitor.SubscriptionDiagnosticSettingArgs(
                     Name = $"telemetry-{environment}",
                     EventHubAuthorizationRuleId = sendTo,
-                    EventHubName = hub.Name,
                     Logs =
                         inputList
                             [
@@ -756,7 +739,7 @@ let private run () =
         // 4. Report
         Log.Info(
             $"environment {environment}: VNet {network.vnet} (nodes {network.nodes}, database {network.database}), "
-            + $"AKS {names.cluster} ({nodeCount} × {nodeSize}), Event Hub {names.eventHubs}/{Telemetry.hub} "
+            + $"AKS {names.cluster} ({nodeCount} × {nodeSize}), Event Hubs {names.eventHubs} "
             + $"({List.length Telemetry.activityLog} Activity Log categories and the server's logs), "
             + $"""Postgres {names.database} ({databases |> List.map _.name |> String.concat ", "}, {rolesJobs.Length} roles Job(s))"""
         )

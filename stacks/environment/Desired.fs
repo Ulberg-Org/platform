@@ -128,11 +128,9 @@ module ServerSettings =
             "log_disconnections", "on"
         ]
 
-/// Azure's own signals for our telemetry (D97): to the environment's Event Hub, which Alloy reads into Loki in
-/// Phase 5.
+/// Azure's own signals for our telemetry (D97): to the environment's Event Hubs namespace, which Alloy reads into
+/// Loki in Phase 5.
 module Telemetry =
-    let hub = "azure-logs"
-
     /// The subscription's Activity Log, all of it; Defender's alerts come as "Security".
     let activityLog =
         [
