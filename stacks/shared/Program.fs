@@ -334,4 +334,4 @@ let private run () =
 
 [<EntryPoint>]
 let main _ =
-    Deployment.RunAsync(fun () -> run ()).GetAwaiter().GetResult()
+    Deployment.RunAsync(run).GetAwaiter().GetResult()

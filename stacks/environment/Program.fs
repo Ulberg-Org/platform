@@ -17,7 +17,7 @@ let private run () =
     let required name =
         System.Environment.GetEnvironmentVariable name
         |> Option.ofObj
-        |> Option.defaultWith (fun () -> raise (RunException $"environment: {name} isn't set"))
+        |> Option.defaultWith (fun _ -> raise (RunException $"environment: {name} isn't set"))
 
     let subscriptionId = required "ARM_SUBSCRIPTION_ID"
     let tenantId = required "ARM_TENANT_ID"
@@ -381,7 +381,7 @@ let private run () =
             )
 
         // Identities that pods use (workload identity, D69): trusted for one Kubernetes service account each.
-        let issuer = cluster.OidcIssuerProfile.Apply(fun p -> p.IssuerURL)
+        let issuer = cluster.OidcIssuerProfile.Apply(_.IssuerURL)
 
         let federate (identity: ManagedIdentity.UserAssignedIdentity) (identityName: string) (subject: string) =
             ManagedIdentity.FederatedIdentityCredential(
@@ -593,7 +593,7 @@ let private run () =
                                             Name = "job",
                                             ConfigMap =
                                                 Pulumi.Kubernetes.Types.Inputs.Core.V1.ConfigMapVolumeSourceArgs(
-                                                    Name = io (files.Metadata.Apply(fun m -> m.Name))
+                                                    Name = io (files.Metadata.Apply(_.Name))
                                                 )
                                         )
                                     )
@@ -646,7 +646,7 @@ let private run () =
         dict
             [
                 "cluster", cluster.Name :> obj
-                "oidcIssuer", cluster.OidcIssuerProfile.Apply(fun p -> p.IssuerURL) :> obj
+                "oidcIssuer", cluster.OidcIssuerProfile.Apply(_.IssuerURL) :> obj
                 "database", database.FullyQualifiedDomainName :> obj
                 "databaseAdminClientId", databaseAdmin.ClientId :> obj
                 "nodesPull", acrPull.Id :> obj
@@ -654,4 +654,4 @@ let private run () =
 
 [<EntryPoint>]
 let main _ =
-    Deployment.RunAsync(fun () -> run ()).GetAwaiter().GetResult()
+    Deployment.RunAsync(run).GetAwaiter().GetResult()

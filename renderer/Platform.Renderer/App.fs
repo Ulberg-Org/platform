@@ -116,7 +116,7 @@ module private Field =
 
     let engine (key: string, db: DatabaseDto) =
         Parse.equals $"databases.{key}.engine" "postgres" db.engine
-        |> Result.bind (fun () -> Name.parse "databases" key)
+        |> Result.bind (fun _ -> Name.parse "databases" key)
 
 let private service (databases: Name list) (d: ServiceDto) : Validation<Service, string> =
     validation {

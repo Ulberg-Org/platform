@@ -70,6 +70,6 @@ let applyClientId (resourceGroup: string) =
         Pulumi.Github.ActionsVariableArgs(
             Repository = RepoName.value RepoName.platform,
             VariableName = "AZURE_CLIENT_ID",
-            Value = io (identity.Apply(fun i -> i.ClientId))
+            Value = io (identity.Apply(_.ClientId))
         )
     )
