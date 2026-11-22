@@ -111,6 +111,21 @@ module Names =
             eventHubs = $"evhns-{prefix}-{environment}"
         }
 
+/// What every part of an environment stack shares: which environment, its names, and where it lives (Program.fs
+/// reads them from its config and CI's environment).
+type Stack =
+    {
+        environment: string
+        names: Names
+        subscription: string
+        tenantId: string
+    }
+
+module Stack =
+    /// A built-in role's id in the subscription.
+    let role (stack: Stack) (id: string) =
+        $"{stack.subscription}/providers/Microsoft.Authorization/roleDefinitions/{id}"
+
 /// The server's settings the platform owns (D92, D93), applied one at a time: Azure refuses parallel changes.
 module ServerSettings =
     /// Azure preloads pg_stat_statements by default; pgaudit joins it. Read only when Postgres starts, so a change

@@ -5,6 +5,11 @@
   <ItemGroup>
     <Compile Include="Desired.fs" />
     <Content Include="kubeconfig.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="VirtualNetwork.fs" />
+    <Compile Include="Aks.fs" />
+    <Compile Include="Postgres.fs" />
+    <Compile Include="AzureSignals.fs" />
+    <Compile Include="Bootstrap.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
