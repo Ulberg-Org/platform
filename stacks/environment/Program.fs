@@ -28,7 +28,6 @@ let private run () =
     let nodeCount = config.RequireInt32 "nodeCount"
     let nodeSize = config.Require "nodeSize"
     let databases = config.RequireObject<AppDatabase list> "databases"
-    let ciIdentityGroup = config.Require "ciIdentityGroup"
     let rolesImage = config.Require "rolesImage"
     let rolesNamespace = "platform-db"
     // The database's roles: the same SQL as locally (D85), then Azure's sign-ins, run by azure-roles.sh.
@@ -47,8 +46,6 @@ let private run () =
 
     let address =
         $"{sharedGroup}/providers/Microsoft.Network/publicIPAddresses/pip-{environment}"
-    // The Entra groups' object IDs, by name, from the access stack (D88).
-    let groups = StackReference "organization/access/main"
 
     let role id =
         $"{subscription}/providers/Microsoft.Authorization/roleDefinitions/{id}"
@@ -60,18 +57,23 @@ let private run () =
         raise (RunException $"environment: {List.length problems} problem(s), see the errors above")
     | Ok network ->
         // 3. Action
-        // `started` tells `destroy` the environment's age (D45); set once, so starting it again doesn't extend it.
+        // The resource group, and who may reach what's in it, are the access stack's (D95): they outlive the
+        // environment, so starting or destroying it never changes access.
+        let groupName = input names.group
+
+        // `started` on the group tells `destroy` the environment's age (D45); set once, so starting it again
+        // doesn't extend it, and removed with the environment.
         let started = System.DateTime.UtcNow.ToString "yyyy-MM-ddTHH:mm:ssZ"
 
-        let group =
-            Resources.ResourceGroup(
-                names.group,
-                Resources.ResourceGroupArgs(
-                    ResourceGroupName = names.group,
-                    Tags = inputMap [ "started", input started ]
-                ),
-                CustomResourceOptions(IgnoreChanges = ResizeArray [ "tags" ])
-            )
+        Resources.TagAtScope(
+            $"{names.group}-started",
+            Resources.TagAtScopeArgs(
+                Scope = $"{subscription}/resourceGroups/{names.group}",
+                Properties = Resources.Inputs.TagsArgs(Tags = inputMap [ "started", input started ])
+            ),
+            CustomResourceOptions(IgnoreChanges = ResizeArray [ "properties" ])
+        )
+        |> ignore
 
         // The network (D86): the database accepts only Postgres from the nodes; the nodes, from the internet,
         // only the gateway's ports to its static address. Everything else inbound is Azure's default deny.
@@ -105,7 +107,7 @@ let private run () =
             Network.NetworkSecurityGroup(
                 $"nsg-{environment}-database",
                 Network.NetworkSecurityGroupArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     SecurityRules =
                         inputList
                             [
@@ -119,7 +121,7 @@ let private run () =
             Network.NetworkSecurityGroup(
                 $"nsg-{environment}-nodes",
                 Network.NetworkSecurityGroupArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     SecurityRules =
                         inputList
                             [
@@ -133,7 +135,7 @@ let private run () =
             Network.VirtualNetwork(
                 $"vnet-{environment}",
                 Network.VirtualNetworkArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     AddressSpace = Network.Inputs.AddressSpaceArgs(AddressPrefixes = inputList [ input network.vnet ])
                 )
             )
@@ -142,7 +144,7 @@ let private run () =
             Network.Subnet(
                 "nodes",
                 Network.SubnetArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     VirtualNetworkName = vnet.Name,
                     SubnetName = "nodes",
                     AddressPrefix = network.nodes,
@@ -154,7 +156,7 @@ let private run () =
             Network.Subnet(
                 "database",
                 Network.SubnetArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     VirtualNetworkName = vnet.Name,
                     SubnetName = "database",
                     AddressPrefix = network.database,
@@ -179,7 +181,7 @@ let private run () =
             PrivateDns.PrivateZone(
                 "database-zone",
                 PrivateDns.PrivateZoneArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     PrivateZoneName = names.databaseZone,
                     Location = "Global"
                 )
@@ -189,7 +191,7 @@ let private run () =
             PrivateDns.VirtualNetworkLink(
                 "database-zone-link",
                 PrivateDns.VirtualNetworkLinkArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     PrivateZoneName = zone.Name,
                     Location = "Global",
                     VirtualNetwork = PrivateDns.Inputs.SubResourceArgs(Id = vnet.Id),
@@ -202,7 +204,7 @@ let private run () =
             ManagedIdentity.UserAssignedIdentity(
                 names.clusterIdentity,
                 ManagedIdentity.UserAssignedIdentityArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     ResourceName = names.clusterIdentity
                 )
             )
@@ -236,7 +238,7 @@ let private run () =
             ContainerService.ManagedCluster(
                 names.cluster,
                 ContainerService.ManagedClusterArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     ResourceName = names.cluster,
                     NodeResourceGroup = names.nodeGroup,
                     DnsPrefix = names.cluster,
@@ -300,29 +302,12 @@ let private run () =
                 )
             )
 
-        // Who reaches the cluster, by Entra group (D84, D88).
-        let clusterAccess =
-            Cluster.access
-            |> List.collect (fun (groupName, roles) ->
-                roles
-                |> List.map (fun clusterRole ->
-                    Authorization.RoleAssignment(
-                        $"aks-{environment}-{groupName}-{(string clusterRole).ToLowerInvariant()}",
-                        Authorization.RoleAssignmentArgs(
-                            Scope = cluster.Id,
-                            RoleDefinitionId = role (ClusterRole.definitionId clusterRole),
-                            PrincipalId = io (groups.RequireOutput(groupName).Apply(fun id -> string id)),
-                            PrincipalType = Authorization.PrincipalType.Group,
-                            Description = $"{groupName}: {clusterRole} on AKS {environment}"
-                        )
-                    )))
-
         // Postgres (D85): private, Entra only; its Entra admin is a managed identity, which the roles Job uses.
         let databaseAdmin =
             ManagedIdentity.UserAssignedIdentity(
                 names.databaseAdmin,
                 ManagedIdentity.UserAssignedIdentityArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     ResourceName = names.databaseAdmin
                 )
             )
@@ -331,7 +316,7 @@ let private run () =
             DBforPostgreSQL.Server(
                 names.database,
                 DBforPostgreSQL.ServerArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     ServerName = names.database,
                     Version = config.Require "postgresVersion",
                     Sku =
@@ -369,7 +354,7 @@ let private run () =
             DBforPostgreSQL.Administrator(
                 $"{names.database}-admin",
                 DBforPostgreSQL.AdministratorArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     ServerName = database.Name,
                     ObjectId = databaseAdmin.PrincipalId,
                     PrincipalName = databaseAdmin.Name,
@@ -387,7 +372,7 @@ let private run () =
             ManagedIdentity.FederatedIdentityCredential(
                 $"{identityName}-aks",
                 ManagedIdentity.FederatedIdentityCredentialArgs(
-                    ResourceGroupName = group.Name,
+                    ResourceGroupName = groupName,
                     ResourceName = identity.Name,
                     FederatedIdentityCredentialResourceName = "aks",
                     Issuer = io issuer,
@@ -409,7 +394,7 @@ let private run () =
                     ManagedIdentity.UserAssignedIdentity(
                         identityName,
                         ManagedIdentity.UserAssignedIdentityArgs(
-                            ResourceGroupName = group.Name,
+                            ResourceGroupName = groupName,
                             ResourceName = identityName
                         )
                     )
@@ -420,7 +405,7 @@ let private run () =
                 DBforPostgreSQL.Database(
                     $"{names.database}-{d.name}",
                     DBforPostgreSQL.DatabaseArgs(
-                        ResourceGroupName = group.Name,
+                        ResourceGroupName = groupName,
                         ServerName = database.Name,
                         DatabaseName = d.name,
                         Charset = "UTF8",
@@ -429,37 +414,12 @@ let private run () =
                     CustomResourceOptions(DeletedWith = database)
                 ))
 
-        // CI in the cluster: apply runs the bootstrap below, preview only reads (Cluster.ciAccess).
-        let ciAccess =
-            Cluster.ciAccess
-            |> List.collect (fun (name, roles) ->
-                let identity =
-                    ManagedIdentity.GetUserAssignedIdentity.Invoke(
-                        ManagedIdentity.GetUserAssignedIdentityInvokeArgs(
-                            ResourceGroupName = ciIdentityGroup,
-                            ResourceName = $"id-platform-{name}"
-                        )
-                    )
-
-                roles
-                |> List.map (fun clusterRole ->
-                    Authorization.RoleAssignment(
-                        $"aks-{environment}-ci-{name}-{(string clusterRole).ToLowerInvariant()}",
-                        Authorization.RoleAssignmentArgs(
-                            Scope = cluster.Id,
-                            RoleDefinitionId = role (ClusterRole.definitionId clusterRole),
-                            PrincipalId = io (identity.Apply(fun i -> i.PrincipalId)),
-                            PrincipalType = Authorization.PrincipalType.ServicePrincipal,
-                            Description = $"CI ({name}): {clusterRole} on AKS {environment}"
-                        )
-                    )))
-
         // The cluster, for Pulumi: its address and CA, and kubelogin as the job's az session (Cluster.kubeconfig).
         let caData =
             ContainerService.ListManagedClusterUserCredentials
                 .Invoke(
                     ContainerService.ListManagedClusterUserCredentialsInvokeArgs(
-                        ResourceGroupName = group.Name,
+                        ResourceGroupName = groupName,
                         ResourceName = cluster.Name
                     )
                 )
@@ -477,8 +437,7 @@ let private run () =
         let kubernetes =
             Pulumi.Kubernetes.Provider(
                 $"aks-{environment}",
-                Pulumi.Kubernetes.ProviderArgs(KubeConfig = io kubeconfig, DeleteUnreachable = true),
-                CustomResourceOptions(DependsOn = inputList (ciAccess |> List.map (fun r -> input (r :> Resource))))
+                Pulumi.Kubernetes.ProviderArgs(KubeConfig = io kubeconfig, DeleteUnreachable = true)
             )
 
         // What runs in the cluster goes with it: no deletes of their own when the environment is destroyed.
@@ -639,7 +598,7 @@ let private run () =
         // 4. Report
         Log.Info(
             $"environment {environment}: VNet {network.vnet} (nodes {network.nodes}, database {network.database}), "
-            + $"AKS {names.cluster} ({nodeCount} × {nodeSize}, {clusterAccess.Length} access grants), "
+            + $"AKS {names.cluster} ({nodeCount} × {nodeSize}), "
             + $"""Postgres {names.database} ({databases |> List.map _.name |> String.concat ", "}, {rolesJobs.Length} roles Job(s))"""
         )
 

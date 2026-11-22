@@ -9,6 +9,7 @@
     <Compile Include="Entra.fs" />
     <Compile Include="AzureRbac.fs" />
     <Compile Include="CiFederation.fs" />
+    <Compile Include="Environments.fs" />
     <Compile Include="ClaudeApp.fs" />
     <Compile Include="GitHub.fs" />
     <Compile Include="Program.fs" />

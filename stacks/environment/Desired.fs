@@ -71,37 +71,7 @@ module Network =
                     | Ok _ -> None)
             )
 
-/// The cluster's roles that people and agents get, through their Entra groups (D84, D88).
-type ClusterRole =
-    /// Lets them fetch the kubeconfig at all; what they may do is decided by the RBAC roles.
-    | ClusterUser
-    | RbacReader
-    | RbacClusterAdmin
-
-module ClusterRole =
-    let definitionId =
-        function
-        | ClusterUser -> "4abbcc35-e782-43d8-92c5-2d3f1bd2253f"
-        | RbacReader -> "7f6c6a51-bcf8-42ba-9220-52d62157d7db"
-        | RbacClusterAdmin -> "b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b"
-
 module Cluster =
-    /// Readers and every Claude agent read (no Secrets); only platform-write, through PIM, changes anything.
-    /// App developers have nothing in the cluster (AGENTS.md §3).
-    let access =
-        [
-            "platform-read", [ ClusterUser; RbacReader ]
-            "platform-agents", [ ClusterUser; RbacReader ]
-            "platform-write", [ ClusterUser; RbacClusterAdmin ]
-        ]
-
-    /// CI's identities: apply runs the bootstrap (the database's roles; Argo CD in Phase 4), preview only reads.
-    let ciAccess =
-        [
-            "apply", [ ClusterUser; RbacClusterAdmin ]
-            "preview", [ ClusterUser; RbacReader ]
-        ]
-
     let private template =
         System.IO.File.ReadAllText(System.IO.Path.Combine(System.AppContext.BaseDirectory, "kubeconfig.yaml"))
 

@@ -34,32 +34,6 @@ let networkTests =
         ]
 
 [<Tests>]
-let accessTests =
-    testList
-        "environment: who reaches the cluster (D84, D88)"
-        [
-            test "only platform-write may change the cluster" {
-                let admins =
-                    Cluster.access
-                    |> List.filter (fun (_, roles) -> List.contains RbacClusterAdmin roles)
-                    |> List.map fst
-
-                Expect.equal admins [ "platform-write" ] "admins"
-            }
-
-            test "readers and every Claude agent read, and get the kubeconfig to do so" {
-                for group in [ "platform-read"; "platform-agents" ] do
-                    Expect.equal (Map.find group (Map.ofList Cluster.access)) [ ClusterUser; RbacReader ] group
-            }
-
-            test "app developers have nothing in the cluster" {
-                Expect.isFalse
-                    (Cluster.access |> List.exists (fun (group, _) -> group.StartsWith "app-"))
-                    "no app groups"
-            }
-        ]
-
-[<Tests>]
 let nameTests =
     testList
         "environment: names"
@@ -108,11 +82,6 @@ let ciTests =
     testList
         "environment: CI in the cluster"
         [
-            test "the apply identity administers the cluster (it runs the bootstrap); the preview identity only reads" {
-                Expect.equal (Map.find "apply" (Map.ofList Cluster.ciAccess)) [ ClusterUser; RbacClusterAdmin ] "apply"
-                Expect.equal (Map.find "preview" (Map.ofList Cluster.ciAccess)) [ ClusterUser; RbacReader ] "preview"
-            }
-
             test "CI's kubeconfig signs in through kubelogin as the az session, and holds no credential" {
                 let config = Cluster.kubeconfig "aks-dev.hcp.example" "Q0E="
 

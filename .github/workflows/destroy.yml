@@ -99,14 +99,12 @@ jobs:
           # Reconciles the state with Azure first, in case a cancelled run left it half-written.
           refresh: true
           pulumi-version: ${{ env.PULUMI_VERSION }}
-      # The fallback (D45: an environment is disposable): delete its resource group, which takes everything in it
-      # (and AKS its node group), then destroy again, which finds that gone and removes the rest (its role
-      # assignments on shared) from Azure and the state.
-      - name: Fall back to deleting the environment's resource group
+      # The fallback (D45: an environment is disposable): empty its resource group, then destroy again, which finds
+      # that gone and removes the rest (its role assignments on shared) from Azure and the state. The group and the
+      # access on it stay (D95).
+      - name: Fall back to emptying the environment's resource group
         if: steps.destroy.outcome == 'failure'
-        env:
-          GROUP: rg-${{ matrix.environment }}
-        run: az group delete --name "$GROUP" --yes || [ "$(az group exists --name "$GROUP")" = false ]
+        run: .github/scripts/empty_group.sh "rg-${{ matrix.environment }}"
       - if: steps.destroy.outcome == 'failure'
         uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
         with:

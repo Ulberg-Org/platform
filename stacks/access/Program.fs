@@ -41,6 +41,13 @@ let private run () =
                 tenantGroupSettings = script "tenant-group-settings.sh"
             }
 
+        // The environments: the stacks in stacks/environment, each with its config file (D95).
+        let environmentConfigs =
+            Directory.GetFiles(Path.Combine(platformRoot, "stacks", "environment"), "Pulumi.*.yaml")
+            |> Array.sort
+            |> Array.map (fun file -> Path.GetFileName file, File.ReadAllText file)
+            |> List.ofArray
+
         let githubOrgSettings = script "github-org-settings.sh"
         let claudeAppKeyScript = script "claude-app-key.sh"
 
@@ -82,12 +89,17 @@ let private run () =
                 let! ciTrusts = config.Require "ciTrust" |> CiTrust.parse
 
                 let! plan = Desired.plan orgAdmin caState emails tenantDomain ciTrusts access
-                return org, access, plan
+
+                let! environments =
+                    environmentConfigs
+                    |> List.traverseResultA (fun (file, yaml) -> AzureEnvironment.parse file yaml)
+
+                return org, access, plan, environments
             }
 
         match planned with
         | Error errors -> return fail errors
-        | Ok(org, access, plan) ->
+        | Ok(org, access, plan, environments) ->
             let! committed =
                 access.repoLeads
                 |> Map.toList
@@ -110,6 +122,9 @@ let private run () =
                 let ci = CiFederation.deploy subscriptionId ciResourceGroup plan
                 CiFederation.applyClientId ciResourceGroup |> ignore
 
+                let clusterAccess =
+                    Environments.deploy subscriptionId ciResourceGroup entra.groups environments
+
                 let claudeApp =
                     ClaudeApp.deploy
                         subscriptionId
@@ -129,6 +144,7 @@ let private run () =
                     + $"{github.teams.Count} teams, {github.orgMemberships.Length} org members, "
                     + $"{github.environments.Length} environments, "
                     + $"{entra.agents.Length} agent accounts, {ci.Length} CI federated credentials, "
+                    + $"{environments.Length} environment groups ({clusterAccess.Length} cluster role assignments), "
                     + $"Claude app key {claudeAppKey.keyName}"
                 )
 
