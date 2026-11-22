@@ -15,6 +15,9 @@ config:
   # Environments that keep an address here (D45): a static IP and <dnsPrefix>-<environment>.<region>.cloudapp.azure.com.
   shared:environments: [ dev ]
   shared:dnsPrefix: ulberg
+  # The renderer Argo CD's plugin runs in Azure (D100): a release from GitHub's registry, copied into ours by
+  # digest (the signed bytes; `release.yml` signs them). Bump it with the CLI's version (Makefile).
+  shared:renderer: ghcr.io/ulberg-org/platform-renderer:v0.2.4@sha256:31cd749daf55a0dfe0ef477ba0f9fee8017859c6e46d73e8d04501bbcbce5dd5
   # Telemetry storage (D89); globally unique, letters and digits only.
   shared:telemetryAccountName: sttelemetry21784576
   # The monthly budget alert (D89), in the subscription's billing currency.

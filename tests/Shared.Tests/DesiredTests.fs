@@ -68,3 +68,29 @@ let environmentTests =
                     Expect.contains ResourceProviders.all used used
             }
         ]
+
+[<Tests>]
+let importTests =
+    testList
+        "shared: images copied into the registry (D100)"
+        [
+            test "a pinned release is copied by digest, under our name, keeping its tag" {
+                let digest = "sha256:" + String.replicate 64 "a"
+
+                Expect.equal
+                    (ImportedImage.parse "platform/renderer" $"ghcr.io/org/platform-renderer:v0.2.4@{digest}")
+                    (Ok
+                        {
+                            source = $"ghcr.io/org/platform-renderer@{digest}"
+                            target = "platform/renderer:v0.2.4"
+                            digest = digest
+                        })
+                    "pinned"
+            }
+
+            test "an image without its digest is refused: only the signed bytes may be copied" {
+                Expect.isError
+                    (ImportedImage.parse "platform/renderer" "ghcr.io/org/platform-renderer:v0.2.4")
+                    "no digest"
+            }
+        ]

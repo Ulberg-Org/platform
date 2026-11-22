@@ -117,7 +117,7 @@ let deploy (stack: Stack) (vnet: VirtualNetwork.Deployed) (settings: Settings) :
             $"aks-{environment}-acr-pull",
             Authorization.RoleAssignmentArgs(
                 Scope = settings.registry,
-                RoleDefinitionId = Stack.role stack AzureRole.acrPull,
+                RoleDefinitionId = Stack.role stack AzureRole.registryReader,
                 PrincipalId =
                     io (
                         cluster.IdentityProfile.Apply(fun profile -> (nonNull profile).Item("kubeletidentity").ObjectId)

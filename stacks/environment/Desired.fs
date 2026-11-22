@@ -81,7 +81,9 @@ module Cluster =
 
 /// Built-in roles the environment's own identities get.
 module AzureRole =
-    let acrPull = "7f951dda-4ed3-4680-a7ca-43fe172d538d"
+    /// Container Registry Repository Reader: pull. Our registry uses repository permissions (ABAC), which ignore
+    /// AcrPull (Microsoft's ACR ABAC docs).
+    let registryReader = "b93aa761-3e63-49ed-ac28-beffa264f7ac"
     let networkContributor = "4d97b98b-1d4f-4787-a291-c67834d212e7"
 
 /// An environment's resource names, all derived from its name.

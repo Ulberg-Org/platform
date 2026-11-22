@@ -2,6 +2,8 @@
 /// functions, so every rule here is unit-tested; Program.fs only turns it into resources.
 module Platform.Shared.Desired
 
+open FsToolkit.ErrorHandling
+
 /// An app whose CI may push images: only from its `main` branch (the OIDC subject), and only into its own
 /// repositories in the registry (`<app>/...`).
 type AppRegistryAccess =
@@ -32,6 +34,36 @@ let repositoryCondition (prefix: string) =
 
     $"(({actions}) OR (@Request[Microsoft.ContainerRegistry/registries/repositories:name] "
     + $"StringStartsWithIgnoreCase '{prefix}'))"
+
+/// An image copied into our registry from a release elsewhere (D100), so AKS pulls only from ACR. Copied by
+/// digest: the exact bytes that were signed, which can't change; under our name, keeping the release's tag.
+type ImportedImage =
+    {
+        source: string
+        target: string
+        digest: string
+    }
+
+module ImportedImage =
+    let private pinned =
+        System.Text.RegularExpressions.Regex
+            @"^(?<image>[^@:\s]+(:[0-9]+)?/[^@:\s]+):(?<tag>[A-Za-z0-9._-]+)@(?<digest>sha256:[0-9a-f]{64})$"
+
+    /// `pin`: `<registry>/<name>:<tag>@sha256:<digest>`; `name`: the repository in ours.
+    let parse (name: string) (pin: string) : Result<ImportedImage, string> =
+        let found = pinned.Match pin
+        let group (key: string) = found.Groups[key].Value
+
+        found.Success
+        |> Result.requireTrue $"'{pin}' isn't pinned as <registry>/<name>:<tag>@sha256:<digest>"
+        |> Result.map (fun _ ->
+            let image, tag, digest = group "image", group "tag", group "digest"
+
+            {
+                source = $"{image}@{digest}"
+                target = $"{name}:{tag}"
+                digest = digest
+            })
 
 /// The environments that may exist (D45): each keeps a static IP and a DNS label here, so its address never
 /// changes although it's rebuilt every time.

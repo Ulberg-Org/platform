@@ -122,3 +122,13 @@ let securityTests =
                 Expect.contains Telemetry.activityLog "Administrative" "who changed what"
             }
         ]
+
+[<Tests>]
+let registryTests =
+    testList
+        "environment: pulling from the registry"
+        [
+            test "the nodes pull with Container Registry Repository Reader: our registry (ABAC) ignores AcrPull" {
+                Expect.equal AzureRole.registryReader "b93aa761-3e63-49ed-ac28-beffa264f7ac" "Repository Reader"
+            }
+        ]
