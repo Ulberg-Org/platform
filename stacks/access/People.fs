@@ -193,7 +193,7 @@ let private resolve (people: Person list) (context: string) (names: string list 
         found
         |> Result.requireNotEmpty "needs at least one person"
         |> Validation.ofResult
-        |> Validation.map (fun () -> List.distinct found))
+        |> Validation.map (fun _ -> List.distinct found))
     |> Parse.within context
 
 let private groups people (dto: Map<string, string list option>) =
