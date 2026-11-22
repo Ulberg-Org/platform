@@ -56,4 +56,15 @@ let environmentTests =
             test "the budget warns at half, most and all of it" {
                 Expect.equal Budget.thresholds [ 50; 80; 100 ] "thresholds"
             }
+
+            test "every Azure service a stack uses is registered by code, not by hand" {
+                for used in
+                    [
+                        "Microsoft.Security"
+                        "Microsoft.EventHub"
+                        "Microsoft.Insights"
+                        "Microsoft.DBforPostgreSQL"
+                    ] do
+                    Expect.contains ResourceProviders.all used used
+            }
         ]
