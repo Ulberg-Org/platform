@@ -365,6 +365,138 @@ let private run () =
                 CustomResourceOptions(DeletedWith = database)
             )
 
+        // The settings the platform owns (D93), one after another (ServerSettings), then a restart: Postgres reads
+        // shared_preload_libraries only at start, and Pulumi can't restart a server, so az does, as CI's apply
+        // identity, once per server and preload.
+        let settings =
+            ServerSettings.all
+            |> List.fold
+                (fun (previous: Resource list) (name, value) ->
+                    [
+                        DBforPostgreSQL.Configuration(
+                            $"{names.database}-{name}",
+                            DBforPostgreSQL.ConfigurationArgs(
+                                ResourceGroupName = groupName,
+                                ServerName = database.Name,
+                                ConfigurationName = name,
+                                Value = value,
+                                Source = "user-override"
+                            ),
+                            CustomResourceOptions(
+                                DeletedWith = database,
+                                DependsOn = inputList (List.map input previous)
+                            )
+                        )
+                        :> Resource
+                    ])
+                []
+
+        let restart =
+            Pulumi.Command.Local.Command(
+                $"{names.database}-restart",
+                Pulumi.Command.Local.CommandArgs(
+                    Create = "az postgres flexible-server restart --resource-group \"$GROUP\" --name \"$SERVER\"",
+                    Environment = inputMap [ "GROUP", input names.group; "SERVER", input names.database ],
+                    Triggers = inputList [ io (database.Id.Apply box); input (box ServerSettings.preload) ]
+                ),
+                CustomResourceOptions(DeletedWith = database, DependsOn = inputList (List.map input settings))
+            )
+
+        // Azure's own signals for our telemetry (D97): the environment's Event Hub, which Alloy reads into Loki in
+        // Phase 5. Standard, for the Kafka endpoint Alloy reads; open only to Azure's own services until then.
+        let hubs =
+            EventHub.Namespace(
+                names.eventHubs,
+                EventHub.NamespaceArgs(
+                    ResourceGroupName = groupName,
+                    NamespaceName = names.eventHubs,
+                    Sku =
+                        EventHub.Inputs.SkuArgs(
+                            Name = EventHub.SkuName.Standard,
+                            Tier = EventHub.SkuTier.Standard,
+                            Capacity = 1
+                        ),
+                    MinimumTlsVersion = "1.2"
+                )
+            )
+
+        let hub =
+            EventHub.EventHub(
+                Telemetry.hub,
+                EventHub.EventHubArgs(
+                    ResourceGroupName = groupName,
+                    NamespaceName = hubs.Name,
+                    EventHubName = Telemetry.hub,
+                    PartitionCount = 1.0,
+                    RetentionDescription =
+                        EventHub.Inputs.RetentionDescriptionArgs(
+                            CleanupPolicy = EventHub.CleanupPolicyRetentionDescription.Delete,
+                            RetentionTimeInHours = 24.0
+                        )
+                ),
+                CustomResourceOptions(DeletedWith = hubs)
+            )
+
+        let hubNetwork =
+            EventHub.NamespaceNetworkRuleSet(
+                $"{names.eventHubs}-network",
+                EventHub.NamespaceNetworkRuleSetArgs(
+                    ResourceGroupName = groupName,
+                    NamespaceName = hubs.Name,
+                    DefaultAction = EventHub.DefaultAction.Deny,
+                    TrustedServiceAccessEnabled = true,
+                    PublicNetworkAccess = EventHub.PublicNetworkAccessFlag.Enabled
+                ),
+                CustomResourceOptions(DeletedWith = hubs)
+            )
+
+        // Azure Monitor streams with the namespace's own rule (it needs Manage, Send and Listen).
+        let sendTo =
+            hubs.Id.Apply(fun id -> $"{id}/authorizationRules/RootManageSharedAccessKey")
+
+        let toHub =
+            CustomResourceOptions(DependsOn = inputList [ input (hubNetwork :> Resource) ])
+
+        // The server's logs: pgaudit, connections, slow queries, errors.
+        let serverLogs =
+            Monitor.DiagnosticSetting(
+                $"{names.database}-telemetry",
+                Monitor.DiagnosticSettingArgs(
+                    Name = "telemetry",
+                    ResourceUri = database.Id,
+                    EventHubAuthorizationRuleId = sendTo,
+                    EventHubName = hub.Name,
+                    Logs =
+                        inputList
+                            [
+                                input (
+                                    Monitor.Inputs.DiagnosticsLogSettingsArgs(CategoryGroup = "allLogs", Enabled = true)
+                                )
+                            ]
+                ),
+                toHub
+            )
+
+        // The subscription's Activity Log, Defender's alerts included, while the environment runs.
+        let activityLog =
+            Monitor.SubscriptionDiagnosticSetting(
+                $"{environment}-activity-log",
+                Monitor.SubscriptionDiagnosticSettingArgs(
+                    Name = $"telemetry-{environment}",
+                    EventHubAuthorizationRuleId = sendTo,
+                    EventHubName = hub.Name,
+                    Logs =
+                        inputList
+                            [
+                                for category in Telemetry.activityLog ->
+                                    input (
+                                        Monitor.Inputs.SubscriptionLogSettingsArgs(Category = category, Enabled = true)
+                                    )
+                            ]
+                ),
+                toHub
+            )
+
         // Identities that pods use (workload identity, D69): trusted for one Kubernetes service account each.
         let issuer = cluster.OidcIssuerProfile.Apply(_.IssuerURL)
 
@@ -591,6 +723,8 @@ let private run () =
                                     input (administrator :> Resource)
                                     input (adminFederation :> Resource)
                                     input (appDatabase :> Resource)
+                                    // pgaudit's extension needs the restarted server.
+                                    input (restart :> Resource)
                                 ]
                     )
                 ))
@@ -598,7 +732,8 @@ let private run () =
         // 4. Report
         Log.Info(
             $"environment {environment}: VNet {network.vnet} (nodes {network.nodes}, database {network.database}), "
-            + $"AKS {names.cluster} ({nodeCount} × {nodeSize}), "
+            + $"AKS {names.cluster} ({nodeCount} × {nodeSize}), Event Hub {names.eventHubs}/{Telemetry.hub} "
+            + $"({List.length Telemetry.activityLog} Activity Log categories and the server's logs), "
             + $"""Postgres {names.database} ({databases |> List.map _.name |> String.concat ", "}, {rolesJobs.Length} roles Job(s))"""
         )
 
@@ -609,6 +744,9 @@ let private run () =
                 "database", database.FullyQualifiedDomainName :> obj
                 "databaseAdminClientId", databaseAdmin.ClientId :> obj
                 "nodesPull", acrPull.Id :> obj
+                "eventHubs", hubs.Name :> obj
+                "serverLogs", serverLogs.Id :> obj
+                "activityLog", activityLog.Id :> obj
             ]
 
 [<EntryPoint>]

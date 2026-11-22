@@ -44,6 +44,7 @@ let nameTests =
                 Expect.equal n.cluster "aks-dev" "cluster"
                 Expect.equal n.database "psql-ulberg-dev" "database (globally unique)"
                 Expect.equal n.databaseZone "dev.private.postgres.database.azure.com" "private DNS zone"
+                Expect.equal n.eventHubs "evhns-ulberg-dev" "Event Hubs namespace (globally unique)"
             }
         ]
 
@@ -90,5 +91,34 @@ let ciTests =
                 Expect.stringContains config "command: kubelogin" "kubelogin"
                 Expect.stringContains config "- azurecli" "as the az session"
                 Expect.isFalse (config.Contains "token:") "no token"
+            }
+        ]
+
+[<Tests>]
+let securityTests =
+    testList
+        "environment: the database's security and Azure's signals (D93, D97)"
+        [
+            test "pgaudit is allowed and preloaded, next to pg_stat_statements" {
+                let settings = Map.ofList ServerSettings.all
+                Expect.equal settings["azure.extensions"] "PGAUDIT" "allowed"
+                Expect.equal settings["shared_preload_libraries"] ServerSettings.preload "preloaded"
+                Expect.equal ServerSettings.preload "pg_stat_statements,pgaudit" "keeps Azure's default"
+            }
+
+            test "pgaudit logs role and privilege changes and DDL, each class named (Azure takes no -class)" {
+                let settings = Map.ofList ServerSettings.all
+                Expect.equal settings["pgaudit.log"] "ROLE,DDL" "classes"
+            }
+
+            test "every connection and disconnection is logged, so failed sign-ins are too" {
+                let settings = Map.ofList ServerSettings.all
+                Expect.equal settings["log_connections"] "on" "connections"
+                Expect.equal settings["log_disconnections"] "on" "disconnections"
+            }
+
+            test "the subscription's Activity Log goes to the hub, with Defender's alerts (Security)" {
+                Expect.contains Telemetry.activityLog "Security" "Defender's alerts"
+                Expect.contains Telemetry.activityLog "Administrative" "who changed what"
             }
         ]

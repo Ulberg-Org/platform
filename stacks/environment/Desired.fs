@@ -94,10 +94,11 @@ type Names =
         database: string
         databaseAdmin: string
         databaseZone: string
+        eventHubs: string
     }
 
 module Names =
-    /// `prefix` makes the database's name globally unique.
+    /// `prefix` makes the database's and the Event Hubs namespace's names globally unique.
     let forEnvironment (prefix: string) (environment: string) =
         {
             group = $"rg-{environment}"
@@ -107,7 +108,43 @@ module Names =
             database = $"psql-{prefix}-{environment}"
             databaseAdmin = $"id-db-admin-{environment}"
             databaseZone = $"{environment}.private.postgres.database.azure.com"
+            eventHubs = $"evhns-{prefix}-{environment}"
         }
+
+/// The server's settings the platform owns (D92, D93), applied one at a time: Azure refuses parallel changes.
+module ServerSettings =
+    /// Azure preloads pg_stat_statements by default; pgaudit joins it. Read only when Postgres starts, so a change
+    /// needs a restart.
+    let preload = "pg_stat_statements,pgaudit"
+
+    /// pgaudit logs role and privilege changes and DDL, each class named (Azure takes no `-class`); every
+    /// connection and disconnection is logged, failed sign-ins included.
+    let all =
+        [
+            "azure.extensions", "PGAUDIT"
+            "shared_preload_libraries", preload
+            "pgaudit.log", "ROLE,DDL"
+            "log_connections", "on"
+            "log_disconnections", "on"
+        ]
+
+/// Azure's own signals for our telemetry (D97): to the environment's Event Hub, which Alloy reads into Loki in
+/// Phase 5.
+module Telemetry =
+    let hub = "azure-logs"
+
+    /// The subscription's Activity Log, all of it; Defender's alerts come as "Security".
+    let activityLog =
+        [
+            "Administrative"
+            "Security"
+            "ServiceHealth"
+            "Alert"
+            "Recommendation"
+            "Policy"
+            "Autoscale"
+            "ResourceHealth"
+        ]
 
 /// An app's database on the environment's server (D69, D85), and the service that uses it.
 type AppDatabase =

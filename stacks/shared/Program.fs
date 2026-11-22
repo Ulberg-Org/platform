@@ -306,10 +306,23 @@ let private run () =
         )
         |> ignore
 
+        // Defender for open-source databases (D93, D97): the subscription's plan, so every Postgres server is covered
+        // (dev now, prod later), billed per server-hour. Its alerts reach our telemetry through the Activity Log.
+        let defender =
+            Security.Pricing(
+                "defender-open-source-databases",
+                Security.PricingArgs(
+                    ScopeId = $"/subscriptions/{subscriptionId}",
+                    PricingName = "OpenSourceRelationalDatabases",
+                    PricingTier = Security.PricingTier.Standard
+                )
+            )
+
         // 4. Report
         Log.Info(
             $"shared: registry {registryName} (Basic, Entra-only, repository permissions), {apps.Length} app pusher(s); "
-            + $"""addresses for {String.concat ", " environments}; telemetry storage {telemetryAccountName}; budget {budget}/month"""
+            + $"""addresses for {String.concat ", " environments}; telemetry storage {telemetryAccountName}; budget {budget}/month; """
+            + "Defender for open-source databases"
         )
 
         dict
@@ -322,6 +335,7 @@ let private run () =
                     addresses
                     |> List.map (fun (environment, ip) -> $"{environment}Ip", ip.IpAddress :> obj)
                 "telemetryAccount", telemetry.Name :> obj
+                "defenderOpenSourceDatabases", defender.PricingTier :> obj
             ]
     | _ ->
         let problems =
