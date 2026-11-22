@@ -463,6 +463,19 @@ let private run () =
         let toHub =
             CustomResourceOptions(DependsOn = inputList [ input (hubNetwork :> Resource) ])
 
+        // A resource's diagnostic settings outlive it and reattach to a new one with the same name (Microsoft's
+        // troubleshooting docs), so a server from an earlier run can leave "telemetry" behind, which Pulumi can only
+        // create. It's deleted first, whatever left it.
+        let staleServerLogs =
+            Pulumi.Command.Local.Command(
+                $"{names.database}-telemetry-stale",
+                Pulumi.Command.Local.CommandArgs(
+                    Create = "az monitor diagnostic-settings delete --resource \"$SERVER\" --name telemetry || true",
+                    Environment = inputMap [ "SERVER", io database.Id ]
+                ),
+                CustomResourceOptions(DeletedWith = database)
+            )
+
         // The server's logs: pgaudit, connections, slow queries, errors.
         let serverLogs =
             Monitor.DiagnosticSetting(
@@ -479,7 +492,9 @@ let private run () =
                                 )
                             ]
                 ),
-                toHub
+                CustomResourceOptions(
+                    DependsOn = inputList [ input (hubNetwork :> Resource); input (staleServerLogs :> Resource) ]
+                )
             )
 
         // The subscription's Activity Log, Defender's alerts included, while the environment runs.
