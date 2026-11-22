@@ -323,13 +323,13 @@ let private run () =
 
         // Defender for open-source databases (D93, D97): the subscription's plan, so every Postgres server is covered
         // (dev now, prod later), billed per server-hour. Its alerts reach our telemetry through the Activity Log.
+        // Every plan always exists (Free until switched on), which Pulumi can only create, so az switches it on.
         let defender =
-            Security.Pricing(
+            Command(
                 "defender-open-source-databases",
-                Security.PricingArgs(
-                    ScopeId = $"/subscriptions/{subscriptionId}",
-                    PricingName = "OpenSourceRelationalDatabases",
-                    PricingTier = Security.PricingTier.Standard
+                CommandArgs(
+                    Create = "az security pricing create --name OpenSourceRelationalDatabases --tier standard",
+                    Triggers = inputList [ input (box "OpenSourceRelationalDatabases standard") ]
                 ),
                 CustomResourceOptions(
                     DependsOn = inputList [ input (providers["Microsoft.Security"] :> Pulumi.Resource) ]
@@ -353,7 +353,7 @@ let private run () =
                     addresses
                     |> List.map (fun (environment, ip) -> $"{environment}Ip", ip.IpAddress :> obj)
                 "telemetryAccount", telemetry.Name :> obj
-                "defenderOpenSourceDatabases", defender.PricingTier :> obj
+                "defenderOpenSourceDatabases", defender.Stdout :> obj
             ]
     | _ ->
         let problems =
