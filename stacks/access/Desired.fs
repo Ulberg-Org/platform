@@ -874,7 +874,8 @@ let plan
                             repo = RepoName.platform
                             name = "dev"
                             branchPolicyId = Some 65981291
-                            reviewers = Some(Team.leadsOf RepoName.platform)
+                            // One approval into dev (D99): the PR's; `main` only, no second click.
+                            reviewers = None
                         }
                         // Tearing environments down needs no approval (D45): only `destroy` runs in it.
                         {

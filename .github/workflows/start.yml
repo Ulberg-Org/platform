@@ -1,14 +1,20 @@
-# Starts an environment from code (D45): `pulumi up` of its stack, after a platform lead's approval (the
-# `dev` GitHub environment). `destroy` removes it 4 hours after it started.
+# Starts or updates an environment from code (D45): `pulumi up` of its stack, in the `dev` GitHub environment
+# (`main` only). The pulumi workflow calls it after every merge (D99: the PR's approval is the only one into dev);
+# it can also be run by hand. `destroy` removes the environment 4 hours after its latest start.
 name: start
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: The environment to start (destroyed 4 hours after it started)
+        description: The environment to start (destroyed 4 hours after its latest start)
         type: choice
         options: [ dev ]
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
 
 permissions:
   contents: read

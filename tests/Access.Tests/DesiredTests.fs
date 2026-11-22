@@ -311,7 +311,7 @@ let tests =
 
                 Expect.equal
                     (plan.environments |> List.map (fun e -> e.name, e.reviewers))
-                    [ "dev", Some "platform-leads"; "teardown", None; "release", None ]
+                    [ "dev", None; "teardown", None; "release", None ]
                     "reviewers"
 
                 Expect.equal plan.orgDefaults.baseRepositoryPermission "none" "base permission"

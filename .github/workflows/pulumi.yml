@@ -1,8 +1,8 @@
 name: pulumi
 
-# Preview on every PR, on main and every night (drift and standing access). Apply only on pushes to main,
-# after a platform lead approves the `dev` environment. Azure only issues a token for the apply identity
-# to an approved `dev` job.
+# Preview on every PR, on main and every night (drift and standing access). Apply only on pushes to main, in the
+# `dev` environment (`main` only), then start or update dev (D99: the PR's approval is the only one into dev).
+# Azure only issues a token for the apply identity to a `dev` job, which only `main` can run.
 on:
   pull_request:
   push:
@@ -247,3 +247,16 @@ jobs:
           GITHUB_TOKEN: ${{ steps.github.outputs.token }}
           # The budget's recipients (D40, D89).
           PLATFORM_ALERT_EMAILS: ${{ secrets.PLATFORM_ALERT_EMAILS }}
+
+  # D99: after the stacks, dev starts (or updates) with what was merged; `destroy` removes it 4 hours after the
+  # latest merge.
+  start-dev:
+    name: start dev
+    if: github.event_name == 'push'
+    needs: apply
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/start.yml
+    with:
+      environment: dev

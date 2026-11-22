@@ -65,8 +65,8 @@ let private run () =
         raise (RunException $"environment: {List.length problems} problem(s), see the errors above")
     | Ok network ->
         // 3. Action
-        // `started` on the group tells `destroy` the environment's age (D45); set once, so starting it again
-        // doesn't extend it, and removed with the environment.
+        // `started` on the group tells `destroy` when the environment last started (D45, D99): every `pulumi up`
+        // moves it, so dev lives 4 hours after the latest merge; removed with the environment.
         let started = System.DateTime.UtcNow.ToString "yyyy-MM-ddTHH:mm:ssZ"
 
         Resources.TagAtScope(
@@ -74,8 +74,7 @@ let private run () =
             Resources.TagAtScopeArgs(
                 Scope = $"{stack.subscription}/resourceGroups/{stack.names.group}",
                 Properties = Resources.Inputs.TagsArgs(Tags = inputMap [ "started", input started ])
-            ),
-            CustomResourceOptions(IgnoreChanges = ResizeArray [ "properties" ])
+            )
         )
         |> ignore
 
