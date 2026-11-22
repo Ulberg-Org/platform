@@ -375,7 +375,9 @@ let private run () =
                     PrincipalName = databaseAdmin.Name,
                     PrincipalType = DBforPostgreSQL.PrincipalType.ServicePrincipal,
                     TenantId = tenantId
-                )
+                ),
+                // Goes with the server: dropped on its own, Postgres refuses (it granted the roles' memberships).
+                CustomResourceOptions(DeletedWith = database)
             )
 
         // Identities that pods use (workload identity, D69): trusted for one Kubernetes service account each.
@@ -423,7 +425,8 @@ let private run () =
                         DatabaseName = d.name,
                         Charset = "UTF8",
                         Collation = "en_US.utf8"
-                    )
+                    ),
+                    CustomResourceOptions(DeletedWith = database)
                 ))
 
         // CI in the cluster: apply runs the bootstrap below, preview only reads (Cluster.ciAccess).
@@ -478,7 +481,8 @@ let private run () =
                 CustomResourceOptions(DependsOn = inputList (ciAccess |> List.map (fun r -> input (r :> Resource))))
             )
 
-        let inCluster = CustomResourceOptions(Provider = kubernetes)
+        // What runs in the cluster goes with it: no deletes of their own when the environment is destroyed.
+        let inCluster = CustomResourceOptions(Provider = kubernetes, DeletedWith = cluster)
 
         // The bootstrap (D85): a Job per database applies its roles as the server's Entra admin, once per server.
         let rolesNs =
@@ -501,7 +505,11 @@ let private run () =
                             Annotations = inputMap [ "azure.workload.identity/client-id", io databaseAdmin.ClientId ]
                         )
                 ),
-                CustomResourceOptions(Provider = kubernetes, DependsOn = inputList [ input (rolesNs :> Resource) ])
+                CustomResourceOptions(
+                    Provider = kubernetes,
+                    DeletedWith = cluster,
+                    DependsOn = inputList [ input (rolesNs :> Resource) ]
+                )
             )
 
         let rolesJobs =
@@ -523,6 +531,7 @@ let private run () =
                         ),
                         CustomResourceOptions(
                             Provider = kubernetes,
+                            DeletedWith = cluster,
                             DependsOn = inputList [ input (rolesNs :> Resource) ]
                         )
                     )
@@ -615,6 +624,7 @@ let private run () =
                     ),
                     CustomResourceOptions(
                         Provider = kubernetes,
+                        DeletedWith = cluster,
                         DependsOn =
                             inputList
                                 [
