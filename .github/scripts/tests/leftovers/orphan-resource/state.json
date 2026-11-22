@@ -1,0 +1,18 @@
+{
+  "deployment": {
+    "resources": [
+      {
+        "urn": "urn:pulumi:dev::environment::pulumi:pulumi:Stack::environment-dev"
+      },
+      {
+        "id": "/subscriptions/sub/resourceGroups/rg-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/psql"
+      },
+      {
+        "id": "/subscriptions/sub/resourceGroups/rg-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/psql/providers/Microsoft.Insights/diagnosticSettings/telemetry"
+      },
+      {
+        "id": "/subscriptions/sub/providers/Microsoft.Insights/diagnosticSettings/telemetry-dev"
+      }
+    ]
+  }
+}

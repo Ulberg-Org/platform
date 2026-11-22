@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# A stand-in for the `az` calls in check_leftovers.sh, reading a case from $FIXTURE (tests/leftovers/<case>):
+# group-exists, resources (one id per line), settings ("<resource id> <setting id>" lines),
+# subscription-settings (one id per line).
+set -euo pipefail
+case "$1 $2" in
+  "group exists") cat "$FIXTURE/group-exists" ;;
+  "resource list") cat "$FIXTURE/resources" ;;
+  "monitor diagnostic-settings")
+    if [ "$3" = subscription ]; then
+      cat "$FIXTURE/subscription-settings"
+    else
+      awk -v r="$5" '$1 == r { print $2 }' "$FIXTURE/settings"
+    fi
+    ;;
+  *) echo "fake-az-leftovers: no stand-in for $*" >&2; exit 1 ;;
+esac

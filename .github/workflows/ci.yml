@@ -78,6 +78,8 @@ jobs:
         run: .github/scripts/test_due_environments.sh
       - name: Test emptying an environment's resource group (D95)
         run: .github/scripts/test_empty_group.sh
+      - name: Test the leftovers check (D98)
+        run: .github/scripts/test_check_leftovers.sh
       - name: Test that claude-push.sh publishes exactly the local tree (D52)
         run: scripts/test_claude_push.sh
       - name: Test the sandbox's azure-read (D96)

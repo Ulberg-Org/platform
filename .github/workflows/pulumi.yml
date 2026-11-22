@@ -172,6 +172,9 @@ jobs:
           pulumi-version: ${{ env.PULUMI_VERSION }}
           diff: true
           comment-on-summary: true
+      # What exists in Azure but not in the state would fail the next `start` with "already exists" (D98).
+      - name: Leftovers check (D98)
+        run: pulumi login "$PULUMI_BACKEND_URL" && .github/scripts/check_leftovers.sh dev
 
   # The required check (`pulumi preview` in the ruleset). It fails explicitly unless all the jobs succeeded: a job
   # that was skipped because another failed would otherwise count as passed.
