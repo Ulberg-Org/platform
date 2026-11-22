@@ -343,22 +343,22 @@ let private run () =
 
         // The renderer, copied into the registry by digest (D100): AKS pulls only from ACR. `az acr import` is a
         // management action (importImage), which CI's apply identity holds as Contributor.
-        let rendererImport =
-            Command(
-                "import-renderer",
-                CommandArgs(
-                    Create = "az acr import --name \"$REGISTRY\" --source \"$SOURCE\" --image \"$TARGET\" --force",
-                    Environment =
-                        inputMap
-                            [
-                                "REGISTRY", input registryName
-                                "SOURCE", input renderer.source
-                                "TARGET", input renderer.target
-                            ],
-                    Triggers = inputList [ input (box renderer.source) ]
-                ),
-                CustomResourceOptions(DependsOn = inputList [ input (registry :> Pulumi.Resource) ])
-            )
+        Command(
+            "import-renderer",
+            CommandArgs(
+                Create = "az acr import --name \"$REGISTRY\" --source \"$SOURCE\" --image \"$TARGET\" --force",
+                Environment =
+                    inputMap
+                        [
+                            "REGISTRY", input registryName
+                            "SOURCE", input renderer.source
+                            "TARGET", input renderer.target
+                        ],
+                Triggers = inputList [ input (box renderer.source) ]
+            ),
+            CustomResourceOptions(DependsOn = inputList [ input (registry :> Pulumi.Resource) ])
+        )
+        |> ignore
 
         // 4. Report
         Log.Info(
@@ -371,12 +371,9 @@ let private run () =
         dict
             [
                 "registryLoginServer", registry.LoginServer :> obj
-                // What values-dev.yaml names (D100): the copy, by digest, once it's imported.
+                // What values-dev.yaml names (D100): the copy, by digest.
                 "rendererImage",
-                Output
-                    .Tuple(registry.LoginServer, rendererImport.Stdout)
-                    .Apply(fun struct (server, _) -> $"{server}/platform/renderer@{renderer.digest}")
-                :> obj
+                registry.LoginServer.Apply(fun server -> $"{server}/platform/renderer@{renderer.digest}") :> obj
                 yield!
                     pushers
                     |> List.map (fun p -> $"{p.app}PushClientId", p.identity.ClientId :> obj)

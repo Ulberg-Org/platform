@@ -1,0 +1,27 @@
+# Argo CD in dev (D100): installed once by the environment stack (stacks/environment/scripts/argocd.sh), then it
+# manages itself from this repo like locally. The renderer for the plugin comes from our ACR, copied there by
+# `shared` (shared:renderer) by the same digest; a test keeps the two equal. The UI with Entra SSO is next.
+configs:
+  params:
+    # TLS ends at the gateway (the UI with SSO, next).
+    server.insecure: true
+repoServer:
+  extraContainers:
+    - name: platform
+      image: crplatform21784576.azurecr.io/platform/renderer@sha256:31cd749daf55a0dfe0ef477ba0f9fee8017859c6e46d73e8d04501bbcbce5dd5
+      command: [/var/run/argocd/argocd-cmp-server]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: { drop: [ ALL ] }
+        seccompProfile: { type: RuntimeDefault }
+      volumeMounts:
+        - { name: var-files, mountPath: /var/run/argocd }
+        - { name: plugins, mountPath: /home/argocd/cmp-server/plugins }
+        - { name: argocd-cmp-cm, mountPath: /home/argocd/cmp-server/config/plugin.yaml, subPath: platform.yaml }
+        - { name: cmp-tmp, mountPath: /tmp }
+  volumes:
+    - { name: argocd-cmp-cm, configMap: { name: argocd-cmp-cm } }
+    - { name: cmp-tmp, emptyDir: {} }

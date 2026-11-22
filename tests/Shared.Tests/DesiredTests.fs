@@ -94,3 +94,25 @@ let importTests =
                     "no digest"
             }
         ]
+
+[<Tests>]
+let rendererPinTests =
+    testList
+        "shared: the renderer Argo CD runs in Azure"
+        [
+            test "values-dev.yaml names the copy shared imports: the same digest (D100)" {
+                let root = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..", "..")
+
+                let read (path: string) =
+                    System.IO.File.ReadAllText(System.IO.Path.Combine(root, path))
+
+                let digest (text: string) =
+                    System.Text.RegularExpressions.Regex
+                        .Match(text, @"platform-?/?renderer[^\s@]*@(sha256:[0-9a-f]{64})")
+                        .Groups[1].Value
+
+                let pinned = digest (read "stacks/shared/Pulumi.main.yaml")
+                Expect.isNotEmpty pinned "shared:renderer is pinned by digest"
+                Expect.equal (digest (read "components/argocd/values-dev.yaml")) pinned "values-dev.yaml"
+            }
+        ]

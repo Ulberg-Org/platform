@@ -22,6 +22,8 @@ type Deployed =
         cluster: ContainerService.ManagedCluster
         acrPull: Authorization.RoleAssignment
         kubernetes: Pulumi.Kubernetes.Provider
+        /// For tools in CI that reach the cluster (Argo CD's bootstrap): kubelogin as the job's az session.
+        kubeconfig: Output<string>
     }
 
 let deploy (stack: Stack) (vnet: VirtualNetwork.Deployed) (settings: Settings) : Deployed =
@@ -150,6 +152,7 @@ let deploy (stack: Stack) (vnet: VirtualNetwork.Deployed) (settings: Settings) :
     {
         cluster = cluster
         acrPull = acrPull
+        kubeconfig = kubeconfig
         kubernetes =
             Pulumi.Kubernetes.Provider(
                 $"aks-{environment}",
