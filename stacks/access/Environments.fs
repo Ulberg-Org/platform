@@ -21,7 +21,8 @@ let private principal (ciResourceGroup: string) (groups: Map<GroupName, Pulumi.A
                         ResourceName = name
                     )
                 )
-                .Apply(fun i -> i.PrincipalId)
+                .Apply
+                _.PrincipalId
 
         name, io principalId, Authorization.PrincipalType.ServicePrincipal
 

@@ -597,7 +597,7 @@ module AzureEnvironment =
 
         found.Success
         |> Result.requireTrue $"stacks/environment/{fileName}: azure-native:location is missing"
-        |> Result.map (fun () ->
+        |> Result.map (fun _ ->
             {
                 name = fileName.Substring("Pulumi.".Length, fileName.Length - "Pulumi..yaml".Length)
                 location = found.Groups[1].Value
