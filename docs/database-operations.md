@@ -72,14 +72,23 @@ state (prepared statements per session, advisory locks) or uses session mode.
   the app's, in its migrations.
 - **Storage:** autogrow on, with an alert well before the limit.
 
-## Security and compliance
+## Security (Phase 3, now: D93)
 
 - **Already:** no public access, Entra only (no passwords), TLS, private DNS, least-privilege roles (D75, D85).
-- **Later, if required:** customer-managed keys (CMK) in Key Vault for encryption at rest; Defender for open-source
-  databases; audit logging (`pgaudit`) into the telemetry (D71).
+- **Audit:** `pgaudit` logs role and privilege changes, DDL and failed sign-ins, and the server logs connections
+  (`log_connections`, `log_disconnections`). Phase 5 brings these logs into Grafana.
+- **Threat detection:** Microsoft Defender for open-source relational databases on the server: unusual access,
+  brute force, suspicious queries. About 15 USD a month per server, billed by the hour, so a few kroner for dev's
+  4-hour runs.
+- **Later, only if compliance requires it:** customer-managed keys (CMK) in Key Vault. Azure already encrypts at rest
+  with its own keys.
 
-## Monitoring
+## Monitoring and alerts (Phase 5: D93)
 
-**Later (Phase 5):** the server's metrics (CPU, memory, storage, connections, replication lag) and logs into the same
-Grafana as everything else (D71), with alerts on storage, connections, long-running queries, replica lag, and failed
-backups or drills.
+The server's metrics (CPU, memory, storage, connections, replication lag), its logs (slow queries, the pgaudit log,
+connections) and Defender's findings go into the same Grafana as everything else (D71). Alerts, to the alert list
+(D40) and readable by Claude (D58):
+- storage above 80 %, connections near the limit, CPU or memory pressure;
+- queries running longer than a minute, deadlocks, failed sign-ins in bursts;
+- replication lag (once there are replicas), failed backups or restore drills;
+- every Defender alert.
