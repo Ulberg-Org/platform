@@ -21,6 +21,27 @@ type Settings =
 /// The Kubernetes service account the Job runs as, which the server's Entra admin trusts.
 let account = "db-admin"
 
+/// Argo CD and its root application (D67, D100), installed once per cluster by scripts/argocd.sh, the same as the
+/// platform CLI does locally. Argo CD then manages itself and everything else from `repo`, so this never runs
+/// again for the same cluster.
+let argocd (stack: Stack) (aks: Aks.Deployed) (repo: string) =
+    Pulumi.Command.Local.Command(
+        "argocd",
+        Pulumi.Command.Local.CommandArgs(
+            Create = "./scripts/argocd.sh",
+            Environment =
+                inputMap
+                    [
+                        "KUBECONFIG_DATA", io aks.kubeconfig
+                        "ENVIRONMENT", input stack.environment
+                        "REPO", input repo
+                    ],
+            Triggers = inputList [ io (aks.cluster.Id.Apply box) ]
+        ),
+        // The plugin's renderer comes from our registry: the nodes must be allowed to pull first.
+        CustomResourceOptions(DeletedWith = aks.cluster, DependsOn = inputList [ input (aks.acrPull :> Resource) ])
+    )
+
 let deploy (stack: Stack) (aks: Aks.Deployed) (postgres: Postgres.Deployed) (settings: Settings) =
     let inCluster =
         CustomResourceOptions(Provider = aks.kubernetes, DeletedWith = aks.cluster)

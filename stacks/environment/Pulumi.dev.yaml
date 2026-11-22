@@ -2,6 +2,8 @@
 secretsprovider: azurekeyvault://kv-platform-21784576.vault.azure.net/keys/pulumi
 encryptedkey: azV3UVZ0XzZGNTE3eXR6el96eC1PVFRqempfQWw3dDVxaW9oX0FCMkZoTGpiVXo3dnhDNUpMXzJqVDNyeTI2djRTM0xMREFzanZ0eE4xSVhLYXI5YUZwV255OFNKQ3BVWG5zWl81N29XcC0wQXhoNmV4MkdJd1c4eE9fNHhfcTJyTWVCWlZiN21CS2pRYVFTNGQxUkl3aHZrMDBFQ2xJekpVdWRQREx6aksyRF9HZFBwU0xrRkZ0MWF5cWwzLTltLWF4NmNYZnFQb2dEUzdfNTh3U3RGMS16SGNucGgtY1o4NmVTRW5Ba0lSTU1IZmVLeGk3LXdqWUM2Vl9UOHZjTEFrZXhfUjM2NEoxZlVRZGtkSUo0eGlqUkJNT3R5anpBYWU3T0ttOUhUNDRFRUpmTlhiRE5FaFd2VkJiMHoxNmt6YkhBa0s0b3E4MjVuZWhnR05LSUxOVlRUc3VjbF9OX1h4OUVIRUxLLUp0aDlKMWpvR3BSbkZFUVlRcDdrZ25BQXkxYXdyeWhsUzBWMDlSSDE5NUlacXVkWTIxS0tqeXZRUEJwS0VLQ3VQcGVRRU5UQ3hpaVUwSjFTZGl0VklrZ0Roc2FiRmdnTmtKUWdXRk1qMG9LbXVObkpmT0lWYndQOGt4NHJiN0RwSnVuOXNuUXdXdlFwT0twdGdGYklmNXU=
 config:
+  # What Argo CD's root application reads (D100): the platform repo on GitHub, public, so no credentials.
+  environment:repo: https://github.com/Ulberg-Org/platform
   # The tenant and subscription come from CI's environment (ARM_TENANT_ID, ARM_SUBSCRIPTION_ID).
   azure-native:location: swedencentral
   # What shared keeps for every environment (D45, D89): its address, and the registry the cluster pulls from.

@@ -400,7 +400,8 @@ up() {
   installed "$namespace" h install argocd "$state"/charts/*.tgz -n "$namespace" --create-namespace \
     -f "$platform_root/components/argocd/values.yaml" -f "$platform_root/components/argocd/values-local.yaml" \
     --wait --timeout 5m
-  k apply -f "$here/templates/root-application.yaml" >/dev/null
+  template cli/templates/root-application.yaml repo=git://git.gitops.svc.cluster.local/platform environment=local |
+    k apply -f - >/dev/null
   synced "$platform_commit" "$app_commit"
   grafana_for_claude
   kubernetes_for_claude
