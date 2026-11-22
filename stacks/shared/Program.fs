@@ -83,6 +83,9 @@ let private run () =
             )
         |> List.ofArray
 
+    // The renderer Argo CD's plugin runs in Azure (D100), a release pinned by digest.
+    let rendererPin = config.Require "renderer"
+
     let repositoryPermissionsScript =
         File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "scripts", "acr-repository-permissions.sh"))
 
@@ -92,13 +95,15 @@ let private run () =
     let environments =
         config.RequireObject<string list> "environments" |> Environment.parse
 
+    let renderer = ImportedImage.parse "platform/renderer" rendererPin
+
     let recipients =
         match alertEmails with
         | [] -> Error "PLATFORM_ALERT_EMAILS is empty: the budget alert (D89) would reach nobody"
         | emails -> Ok emails
 
-    match apps, environments, recipients with
-    | Ok apps, Ok environments, Ok alertEmails ->
+    match apps, environments, recipients, renderer with
+    | Ok apps, Ok environments, Ok alertEmails, Ok renderer ->
         // 3. Action
         let group =
             ResourceGroup("rg-platform-shared", ResourceGroupArgs(ResourceGroupName = "rg-platform-shared"))
@@ -336,16 +341,42 @@ let private run () =
                 )
             )
 
+        // The renderer, copied into the registry by digest (D100): AKS pulls only from ACR. `az acr import` is a
+        // management action (importImage), which CI's apply identity holds as Contributor.
+        let rendererImport =
+            Command(
+                "import-renderer",
+                CommandArgs(
+                    Create = "az acr import --name \"$REGISTRY\" --source \"$SOURCE\" --image \"$TARGET\" --force",
+                    Environment =
+                        inputMap
+                            [
+                                "REGISTRY", input registryName
+                                "SOURCE", input renderer.source
+                                "TARGET", input renderer.target
+                            ],
+                    Triggers = inputList [ input (box renderer.source) ]
+                ),
+                CustomResourceOptions(DependsOn = inputList [ input (registry :> Pulumi.Resource) ])
+            )
+
         // 4. Report
         Log.Info(
             $"shared: registry {registryName} (Basic, Entra-only, repository permissions), {apps.Length} app pusher(s); "
             + $"""addresses for {String.concat ", " environments}; telemetry storage {telemetryAccountName}; budget {budget}/month; """
-            + $"Defender for open-source databases; {providers.Count} resource providers registered"
+            + $"Defender for open-source databases; {providers.Count} resource providers registered; "
+            + $"renderer {renderer.target} ({renderer.digest})"
         )
 
         dict
             [
                 "registryLoginServer", registry.LoginServer :> obj
+                // What values-dev.yaml names (D100): the copy, by digest, once it's imported.
+                "rendererImage",
+                Output
+                    .Tuple(registry.LoginServer, rendererImport.Stdout)
+                    .Apply(fun struct (server, _) -> $"{server}/platform/renderer@{renderer.digest}")
+                :> obj
                 yield!
                     pushers
                     |> List.map (fun p -> $"{p.app}PushClientId", p.identity.ClientId :> obj)
@@ -360,6 +391,7 @@ let private run () =
             problemsOf apps
             @ problemsOf (Result.mapError List.singleton environments)
             @ problemsOf (Result.mapError List.singleton recipients)
+            @ problemsOf (Result.mapError List.singleton renderer)
 
         problems |> List.iter (fun p -> Log.Error p)
         raise (RunException $"shared: {List.length problems} problem(s), see the errors above")
