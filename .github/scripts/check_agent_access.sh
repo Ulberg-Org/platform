@@ -3,7 +3,7 @@
 # access/people.yaml must hold exactly its read roles:
 #   - Azure: Reader, Monitoring Reader, Log Analytics Reader, Cost Management Reader on the subscription
 #     (via platform-agents), plus, on the Claude GitHub App key only, Key Vault Crypto User (D52: sign), and on
-#     each running environment's cluster only, AKS Cluster User and RBAC Reader (D84, D88: read, no Secrets);
+#     each environment's resource group only, AKS Cluster User and RBAC Reader (D84, D88, D95: read, no Secrets);
 #   - Entra roles: Security Reader, active; nothing eligible;
 #   - PIM for Groups: no eligibility, neither for the account nor for platform-agents;
 #   - groups: platform-agents only (so it inherits nothing).
@@ -20,12 +20,13 @@ vault=$(yq '.config["access:keyVault"]' stacks/access/Pulumi.main.yaml)
 vault_rg=$(yq '.config["access:ciIdentityResourceGroup"]' stacks/access/Pulumi.main.yaml)
 app_key_signer="Key Vault Crypto User @ $sub/resourceGroups/$vault_rg/providers/Microsoft.KeyVault/vaults/$vault/keys/claude-github-app"
 security_reader=5d6b6bb7-de71-4623-b4af-96380a352509
-# D88: reads on each environment's own cluster (stacks/environment/Pulumi.<env>.yaml), while it runs. Compared
-# ignoring case: Azure resource ids are case-insensitive, and az writes some parts in lowercase.
+# D88: reads on the clusters in each environment's resource group (stacks/environment/Pulumi.<env>.yaml), granted
+# on the group, which outlives the environment (D95). Compared ignoring case: Azure resource ids are
+# case-insensitive, and az writes some parts in lowercase.
 cluster_reads=$(for config in stacks/environment/Pulumi.*.yaml; do
   env=$(basename "$config" .yaml | sed 's/^Pulumi\.//')
   for role in "Azure Kubernetes Service Cluster User Role" "Azure Kubernetes Service RBAC Reader"; do
-    echo "$role @ $sub/resourceGroups/rg-$env/providers/Microsoft.ContainerService/managedClusters/aks-$env"
+    echo "$role @ $sub/resourceGroups/rg-$env"
   done
 done)
 

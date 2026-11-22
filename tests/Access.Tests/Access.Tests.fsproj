@@ -10,6 +10,7 @@
     <Compile Include="EntraTests.fs" />
     <Compile Include="EmailTests.fs" />
     <Compile Include="CiFederationTests.fs" />
+    <Compile Include="EnvironmentTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
   <ItemGroup>

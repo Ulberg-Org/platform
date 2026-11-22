@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# A stand-in for `az resource list` and `az resource delete --ids` in test_empty_group.sh. The group's resources
+# are the lines of $RESOURCES; `vnet` can only go once `aks` has (a subnet in use), and `stuck` never goes.
+set -euo pipefail
+case "$2" in
+  list) cat "$RESOURCES" ;;
+  delete)
+    shift 3
+    failed=0
+    for id in "$@"; do
+      if [ "$id" = stuck ] || { [ "$id" = vnet ] && grep -qx aks "$RESOURCES"; }; then
+        echo "ERROR: (Conflict) $id can't be deleted yet" >&2
+        failed=1
+      else
+        grep -vx "$id" "$RESOURCES" >"$RESOURCES.new" || true
+        mv "$RESOURCES.new" "$RESOURCES"
+      fi
+    done
+    exit "$failed"
+    ;;
+esac
