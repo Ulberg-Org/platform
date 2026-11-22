@@ -6,6 +6,7 @@
   "nuget.org", "*.nuget.org", "registry.npmjs.org", "nixos.org", "*.nixos.org",
   "helm.cilium.io", "grafana.com", "*.grafana.com", "storage.googleapis.com",
   "*.sigstore.dev",
+  "management.azure.com", "api.loganalytics.io",
   "anthropic.com", "*.anthropic.com", "claude.ai", "*.claude.ai", "claude.com", "*.claude.com",
   "*.ubuntu.com",
   "*.digicert.com", "*.sectigo.com", "*.symcb.com", "*.symcd.com", "*.symantec.com"

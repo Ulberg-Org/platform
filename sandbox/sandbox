@@ -64,11 +64,11 @@ vm 'for tool in docker gh make claude nix; do command -v $tool >/dev/null || exi
 }
 
 # Claude's identity, set up as on the developer's machine (AGENTS.md §4), so the repo's identity hook and
-# scripts/claude-push.sh work unchanged: the app's token (confine.mjs renews it) in Claude's own gh profile, and
-# Claude Code's env pointing git and gh at it.
-token=$("$here/github-token")
-printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n    user: ulberg-claude[bot]\n' "$token" |
-  vm 'mkdir -p ~/.config/gh-claude && cat >~/.config/gh-claude/hosts.yml && chmod 600 ~/.config/gh-claude/hosts.yml'
+# scripts/claude-push.sh work unchanged: the app's token in Claude's own gh profile, and Claude Code's env pointing
+# git and gh at it. In the platform profile also read-only Azure, through azure-read (D96). sandbox/tokens copies
+# the tokens in; confine.mjs renews them.
+"$here/tokens" "$name"
+vm 'sudo tee /usr/local/bin/azure-read >/dev/null && sudo chmod 755 /usr/local/bin/azure-read' <"$here/azure-read"
 vm 'mkdir -p ~/.claude && f=~/.claude/settings.json && { [ -s $f ] || echo "{}" >$f; } &&
   jq --arg profile "$HOME/.config/gh-claude" --slurpfile env /dev/stdin \
     ".env += \$env[0] + {GH_CONFIG_DIR: \$profile}" $f >$f.new && mv $f.new $f' <"$here/claude-env.json"

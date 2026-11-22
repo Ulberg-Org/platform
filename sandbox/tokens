@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Copies Claude's short-lived tokens into its VM (D81, D96): always the GitHub app's (D52), and in the platform
+# profile also read-only Azure access tokens as its agent, for Azure Resource Manager and Log Analytics (read with
+# azure-read). Each lasts an hour: sandbox/sandbox runs this at start, confine.mjs every 45 minutes. Nothing that
+# could renew itself goes in: no refresh token, no az profile.
+#
+#   sandbox/tokens <VM name>
+set -euo pipefail
+name=${1:?usage: sandbox/tokens <VM name>}
+here=$(cd "$(dirname "$0")" && pwd)
+# As Claude's agent, also from the developer's terminal (see sandbox/sandbox).
+export AZURE_CONFIG_DIR="$HOME/.azure-agent"
+
+# Writes stdin to ~/.config/<file> in the VM, readable by Claude only. Each token is fetched before this runs,
+# so a failed fetch leaves the previous one in place.
+into() {
+  limactl shell --workdir / "$name" -- sh -c "mkdir -p ~/.config/${1%/*} && umask 077 && cat >~/.config/$1"
+}
+
+github=$("$here/github-token")
+printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n    user: ulberg-claude[bot]\n' "$github" |
+  into gh-claude/hosts.yml
+
+# The platform profile's VM is <person>-agent-platform (sandbox/sandbox), which only infra developers start (D77).
+case "$name" in *-agent-platform) ;; *) exit 0 ;; esac
+for api in management=https://management.azure.com logs=https://api.loganalytics.io; do
+  token=$(az account get-access-token --resource "${api#*=}" --query accessToken -o tsv)
+  printf '%s' "$token" | into "azure-read/${api%%=*}"
+done

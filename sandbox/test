@@ -14,6 +14,13 @@ check() { # description, command that must FAIL inside the VM
     echo "  ok    $1"
   fi
 }
+works() { # description, command that must SUCCEED inside the VM
+  if limactl shell --workdir / "$name" -- bash -lc "$2" >/dev/null 2>&1; then
+    echo "  ok    $1"
+  else
+    echo "  FAIL  $1"; failed=1
+  fi
+}
 direct='env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy'
 check "none of the developer's folders is mounted" 'ls -d /Users/* || grep -qE "virtiofs|9p" /proc/mounts'
 check "no SSH key or agent of the developer's" 'ls ~/.ssh/id_* || [ -n "${SSH_AUTH_SOCK:-}" ]'
@@ -24,6 +31,20 @@ check "the developer's Mac isn't reachable directly" "$direct curl -s -m 5 -o /d
 check "nor through the proxy" 'curl -sf -m 5 -o /dev/null http://host.lima.internal:9876'
 check "nor the LAN through the proxy" "curl -sf -m 5 -o /dev/null http://$lan"
 check "GitHub only as the app, never a person's account" 'GH_CONFIG_DIR=~/.config/gh-claude gh api user'
+# Azure (D96): access tokens only, in the platform profile only, and they can't write.
+check "no Azure login in the VM (no refresh token)" 'test -e ~/.azure || test -e ~/.azure-agent'
+check "no way to a new Azure token (Entra isn't on the allowlist)" 'curl -sf -m 8 -o /dev/null https://login.microsoftonline.com'
+subscriptions='azure-read "/subscriptions?api-version=2022-12-01" | jq -er ".value[0].subscriptionId"'
+case "$name" in
+  *-agent-platform)
+    works "Azure reads, as Claude's agent" "$subscriptions"
+    check "Azure refuses Claude's writes (creating a resource group)" "sub=\$($subscriptions) &&
+      curl -sf -X PUT -H \"Authorization: Bearer \$(cat ~/.config/azure-read/management)\" -H 'Content-Type: application/json' \
+        -d '{\"location\": \"swedencentral\"}' \
+        \"https://management.azure.com/subscriptions/\$sub/resourcegroups/rg-sandbox-write-test?api-version=2021-04-01\""
+    ;;
+  *) check "no Azure token outside the platform profile" 'test -s ~/.config/azure-read/management' ;;
+esac
 # From the host: the platform profile is refused to an agent whose developer isn't an infra developer (D77),
 # against a copy of access/people.yaml without any.
 fixture=$(mktemp -d); mkdir "$fixture/access"; cp -R "$here" "$fixture/sandbox"
