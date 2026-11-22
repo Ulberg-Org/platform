@@ -76,6 +76,8 @@ jobs:
         run: dotnet run --project tests/Environment.Tests -c Release --no-build
       - name: Test which environments destroy removes (D45)
         run: .github/scripts/test_due_environments.sh
+      - name: Test emptying an environment's resource group (D95)
+        run: .github/scripts/test_empty_group.sh
       - name: Test the teardown guard (guard.yml)
         run: .github/scripts/test_check_teardown_use.sh
       - name: Test releasing a cancelled run's lock (start, destroy)

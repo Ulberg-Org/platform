@@ -581,6 +581,65 @@ let federatedCredentials (trusts: CiTrust list) : FederatedCredential list =
     ]
 
 // ---------------------------------------------------------------------------------------------
+// Environments: their resource groups and who reaches their clusters (D84, D88, D95)
+
+/// An environment, as a stack in stacks/environment. Its resource group lives here, not there, so the access
+/// granted on it outlives the environment's start and destroy (D95).
+type AzureEnvironment = { name: string; location: string }
+
+module AzureEnvironment =
+    let private location =
+        System.Text.RegularExpressions.Regex @"(?m)^\s*azure-native:location:\s*(\S+)\s*$"
+
+    /// From the stack's config file: its name (`Pulumi.<name>.yaml`) and its `azure-native:location`.
+    let parse (fileName: string) (yaml: string) : Result<AzureEnvironment, string> =
+        let found = location.Match yaml
+
+        if found.Success then
+            Ok
+                {
+                    name = fileName.Substring("Pulumi.".Length, fileName.Length - "Pulumi..yaml".Length)
+                    location = found.Groups[1].Value
+                }
+        else
+            Error $"stacks/environment/{fileName}: azure-native:location is missing"
+
+    let group (environment: AzureEnvironment) = $"rg-{environment.name}"
+
+/// The cluster's roles (D84, D88).
+type ClusterRole =
+    /// Lets them fetch the kubeconfig at all; what they may do is decided by the RBAC roles.
+    | ClusterUser
+    | RbacReader
+    | RbacClusterAdmin
+
+module ClusterRole =
+    let definitionId =
+        function
+        | ClusterUser -> "4abbcc35-e782-43d8-92c5-2d3f1bd2253f"
+        | RbacReader -> "7f6c6a51-bcf8-42ba-9220-52d62157d7db"
+        | RbacClusterAdmin -> "b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b"
+
+[<RequireQualifiedAccess>]
+type ClusterGrantee =
+    | Group of GroupName
+    | Ci of CiIdentity
+
+module Cluster =
+    /// Granted on each environment's resource group, so every cluster in it inherits them. Readers, every
+    /// Claude agent and CI's preview read (no Secrets); only platform-write (through PIM) and CI's apply (the
+    /// bootstrap: the database's roles, Argo CD in Phase 4) change anything. App developers have nothing in the
+    /// cluster (AGENTS.md §3).
+    let access =
+        [
+            ClusterGrantee.Group PlatformRead, [ ClusterUser; RbacReader ]
+            ClusterGrantee.Group PlatformAgents, [ ClusterUser; RbacReader ]
+            ClusterGrantee.Group PlatformWrite, [ ClusterUser; RbacClusterAdmin ]
+            ClusterGrantee.Ci ApplyIdentity, [ ClusterUser; RbacClusterAdmin ]
+            ClusterGrantee.Ci PreviewIdentity, [ ClusterUser; RbacReader ]
+        ]
+
+// ---------------------------------------------------------------------------------------------
 // Claude's GitHub identity (D52)
 
 /// The Claude GitHub App's private key: a Key Vault key that may only sign. `signers` may sign with it, to
