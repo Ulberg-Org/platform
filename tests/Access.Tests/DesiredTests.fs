@@ -173,7 +173,7 @@ let tests =
 
                 Expect.equal
                     (find "CA07").users
-                    (Groups [ InfraDevelopers; AppDevelopers; PlatformAgents ])
+                    (Groups [ InfraDevelopers; AppDevelopers; PlatformAgents; AppAgents ])
                     "CA07 users"
             }
 
@@ -221,9 +221,9 @@ let tests =
                     "no browser mode"
             }
 
-            test "Claude's agent (D41): its own account and group, read roles only, never PIM-eligible" {
+            test "every developer's Claude (D41, D91): its own account, read roles only, never PIM-eligible" {
                 let plan = planWith (Some Enforced)
-                Expect.equal (plan.agents |> List.map Agent.key) [ "ann-agent" ] "one agent, for ann"
+                Expect.equal (plan.agents |> List.map Agent.key) [ "ann-agent"; "bob-agent" ] "one per developer"
 
                 let agentGroups =
                     plan.memberships
@@ -233,12 +233,21 @@ let tests =
                         | Member.Person _
                         | Member.Group _ -> None)
 
-                Expect.equal agentGroups [ "platform-agents", "ann-agent" ] "only in platform-agents"
+                Expect.equal
+                    agentGroups
+                    [ "platform-agents", "ann-agent"; "app-agents", "bob-agent" ]
+                    "an infra developer's in platform-agents, an app developer's in app-agents"
 
                 Expect.isFalse
                     (plan.memberships
-                     |> List.exists (fun m -> m.includes = Member.Group PlatformAgents))
-                    "platform-agents is nested in nothing, so it never inherits PIM groups"
+                     |> List.exists (fun m ->
+                         m.includes = Member.Group PlatformAgents || m.includes = Member.Group AppAgents))
+                    "the agents' groups are nested in nothing, so they never inherit PIM groups"
+
+                Expect.isFalse
+                    (plan.roleAssignments
+                     |> List.exists (fun g -> g.grantee = Grantee.Group AppAgents))
+                    "app developers' agents have nothing in Azure"
 
                 let agentRoles =
                     plan.roleAssignments
@@ -250,7 +259,12 @@ let tests =
                 Expect.equal
                     (plan.agentDirectoryRoles |> List.map (fun r -> Agent.key r.agent, r.role))
                     [ "ann-agent", SecurityReader ]
-                    "Security Reader for sign-in and audit logs"
+                    "Security Reader for sign-in and audit logs, for infra developers' agents only"
+
+                Expect.equal
+                    claudeAppKey.signers
+                    [ PlatformAgents; AppAgents ]
+                    "every agent mints Claude's GitHub token (D52)"
 
                 Expect.equal plan.tenantDomain "example.onmicrosoft.com" "user names live in the tenant domain"
             }

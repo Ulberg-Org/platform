@@ -20,8 +20,10 @@ type GroupName =
     | PlatformWrite
     /// Admin. Only reachable by activating PIM, platform leads only.
     | PlatformAdmin
-    /// Claude's agent accounts (D41): read roles only, never PIM-eligible.
+    /// Infra developers' Claude agents (D41, D91): read roles only, never PIM-eligible.
     | PlatformAgents
+    /// App developers' Claude agents (D91): the database read-only and telemetry; nothing in Azure.
+    | AppAgents
 
 module GroupName =
     let all =
@@ -32,6 +34,7 @@ module GroupName =
             PlatformWrite
             PlatformAdmin
             PlatformAgents
+            AppAgents
         ]
 
     let value =
@@ -42,6 +45,7 @@ module GroupName =
         | PlatformWrite -> "platform-write"
         | PlatformAdmin -> "platform-admin"
         | PlatformAgents -> "platform-agents"
+        | AppAgents -> "app-agents"
 
     let description =
         function
@@ -50,13 +54,23 @@ module GroupName =
         | PlatformRead -> "Read on Azure, AKS and the DB. Contains platform-write."
         | PlatformWrite -> "Break-glass write. PIM only (max 2 h). Contains platform-admin."
         | PlatformAdmin -> "Platform admin. PIM only (max 1 h), platform leads only."
-        | PlatformAgents -> "Claude's agent accounts (access/people.yaml agents). Read only, never PIM-eligible."
+        | PlatformAgents -> "Infra developers' Claude agents. Read only, never PIM-eligible."
+        | AppAgents -> "App developers' Claude agents. The database read-only and telemetry, never PIM-eligible."
 
-/// Claude's own Entra account for one developer (D41). It reads what that developer can read day to day,
-/// never holds or activates anything privileged, and its sign-ins show up separately in the audit logs.
-type Agent = { owner: Person }
+/// Claude's own Entra account for one developer (D41, D91). It reads what that developer can read day to day,
+/// never holds or activates anything privileged, and its sign-ins show up separately in the audit logs. Its group
+/// is its developer's reach: platform-agents for an infra developer, app-agents for an app developer.
+type Agent = { owner: Person; group: GroupName }
 
 module Agent =
+    /// One per developer, derived from people.yaml's groups: every developer codes with Claude (D91).
+    let all (access: Access) =
+        let agents group =
+            List.map (fun owner -> { owner = owner; group = group })
+
+        agents PlatformAgents access.infraDevelopers
+        @ agents AppAgents (access.appDevelopers |> List.except access.infraDevelopers)
+
     /// e.g. "endre-agent"; also the account's user name.
     let key (a: Agent) = $"{Person.key a.owner}-agent"
 
@@ -362,7 +376,7 @@ let private conditionalAccess (state: CaState option) (access: Access) =
                 "CA07 Developers sign in every 12 h"
                 [ "all" ]
                 (Apps [ "All" ])
-                (Groups [ InfraDevelopers; AppDevelopers; PlatformAgents ])
+                (Groups [ InfraDevelopers; AppDevelopers; PlatformAgents; AppAgents ])
                 []
                 (Session
                     {
@@ -643,12 +657,17 @@ module Cluster =
 
 /// The Claude GitHub App's private key: a Key Vault key that may only sign. `signers` may sign with it, to
 /// mint 1 h installation tokens; nobody can read it, so the app's identity can't leave Key Vault.
-type ClaudeAppKey = { keyName: string; signers: GroupName }
+type ClaudeAppKey =
+    {
+        keyName: string
+        signers: GroupName list
+    }
 
+/// Every developer's Claude publishes through the app (D91), so both agent groups sign.
 let claudeAppKey =
     {
         keyName = "claude-github-app"
-        signers = PlatformAgents
+        signers = [ PlatformAgents; AppAgents ]
     }
 
 // ---------------------------------------------------------------------------------------------
@@ -689,11 +708,11 @@ let private memberships (access: Access) =
             })
 
     let agents =
-        access.agents
-        |> List.map (fun p ->
+        Agent.all access
+        |> List.map (fun agent ->
             {
-                group = PlatformAgents
-                includes = Member.Agent { owner = p }
+                group = agent.group
+                includes = Member.Agent agent
             })
 
     people InfraDevelopers access.infraDevelopers
@@ -872,15 +891,12 @@ let plan
                         }
                     ]
                 alertEmails = alertEmails
-                agents = access.agents |> List.map (fun p -> { owner = p })
+                agents = Agent.all access
+                // Sign-in and audit logs: what an infra developer reads, so only their agents.
                 agentDirectoryRoles =
-                    [
-                        for p in access.agents ->
-                            {
-                                agent = { owner = p }
-                                role = SecurityReader
-                            }
-                    ]
+                    Agent.all access
+                    |> List.filter (fun agent -> agent.group = PlatformAgents)
+                    |> List.map (fun agent -> { agent = agent; role = SecurityReader })
                 tenantDomain = tenantDomain
                 // Infra developers need P2 for PIM; agents get the same Conditional Access as humans (D41).
                 tenantDefaults = TenantDefaults.locked

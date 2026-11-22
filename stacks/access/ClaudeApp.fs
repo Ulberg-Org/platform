@@ -15,7 +15,7 @@ type Deployed =
     {
         importer: RoleAssignment
         key: Command
-        signers: RoleAssignment
+        signers: RoleAssignment list
     }
 
 let deploy
@@ -70,17 +70,19 @@ let deploy
 
     // Key Vault Crypto User on this one key only. The key's only permitted operation is sign.
     let signers =
-        RoleAssignment(
-            $"{GroupName.value k.signers}-claude-app-key-signer",
-            RoleAssignmentArgs(
-                Scope = $"{vaultScope}/keys/{k.keyName}",
-                RoleDefinitionId = role cryptoUser,
-                PrincipalId = io groups[k.signers].ObjectId,
-                PrincipalType = PrincipalType.Group,
-                Description = $"{GroupName.value k.signers}: sign with the Claude GitHub App key (D52)"
-            ),
-            CustomResourceOptions(DependsOn = inputList [ input (key :> Resource) ])
-        )
+        k.signers
+        |> List.map (fun signer ->
+            RoleAssignment(
+                $"{GroupName.value signer}-claude-app-key-signer",
+                RoleAssignmentArgs(
+                    Scope = $"{vaultScope}/keys/{k.keyName}",
+                    RoleDefinitionId = role cryptoUser,
+                    PrincipalId = io groups[signer].ObjectId,
+                    PrincipalType = PrincipalType.Group,
+                    Description = $"{GroupName.value signer}: sign with the Claude GitHub App key (D52)"
+                ),
+                CustomResourceOptions(DependsOn = inputList [ input (key :> Resource) ])
+            ))
 
     {
         importer = importer

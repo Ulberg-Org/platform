@@ -114,12 +114,10 @@ type Access =
         repoLeads: Map<RepoName, Person list>
         platformLeads: Person list
         emergencyAccess: EntraObjectId list
-        /// Developers whose Claude gets its own read-only agent account (D41). Infra developers only, for now.
-        agents: Person list
     }
 
 module Access =
-    let create people infraDevelopers appDevelopers repoLeads emergencyAccess agents =
+    let create people infraDevelopers appDevelopers repoLeads emergencyAccess =
         {
             people = people
             infraDevelopers = infraDevelopers
@@ -127,7 +125,6 @@ module Access =
             repoLeads = repoLeads
             platformLeads = Map.find RepoName.platform repoLeads
             emergencyAccess = emergencyAccess
-            agents = agents
         }
 
 // ---------------------------------------------------------------------------------------------
@@ -147,7 +144,6 @@ type PeopleFileDto =
         repoLeads: Map<string, string list option> option
         [<JsonPropertyName("emergency-access")>]
         emergencyAccess: string list option
-        agents: string list option
     }
 
 // ---------------------------------------------------------------------------------------------
@@ -240,18 +236,6 @@ let private emergencyAccess (ids: string list) =
         else
             Validation.error "emergency-access: needs two accounts")
 
-/// People whose Claude gets an agent account. Optional section; app developers' agents come with Phase 5,
-/// when there is app telemetry to read, so for now only infra developers can have one.
-let private agents (people: Person list) (infra: Person list) (names: string list) =
-    let agent name =
-        match people |> List.tryFind (fun p -> Person.key p = name) with
-        | None -> Validation.error $"agents: unknown person '{name}'"
-        | Some p when not (List.contains p infra) ->
-            Validation.error $"agents: '{name}' is not an infra developer (app developers' agents come with Phase 5)"
-        | Some p -> Ok p
-
-    names |> List.traverseValidationA agent |> Validation.map List.distinct
-
 let fromDto (dto: PeopleFileDto) : Validation<Access, string> =
     let section name value parse =
         Parse.required name value |> Validation.ofResult |> Validation.bind parse
@@ -265,8 +249,7 @@ let fromDto (dto: PeopleFileDto) : Validation<Access, string> =
         and! infra, app = section "groups" dto.groups (groups people)
         and! leads = section "repo-leads" dto.repoLeads (repoLeads people)
         and! emergency = section "emergency-access" dto.emergencyAccess emergencyAccess
-        let! agents = agents people infra (dto.agents |> Option.defaultValue [])
-        return Access.create people infra app leads emergency agents
+        return Access.create people infra app leads emergency
     }
 
 let parse (yaml: string) : Validation<Access, string> =
