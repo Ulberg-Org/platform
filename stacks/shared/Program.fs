@@ -306,6 +306,21 @@ let private run () =
         )
         |> ignore
 
+        // The Azure services the stacks use, registered before anything uses them (ResourceProviders). Never
+        // unregistered: that would break what uses them.
+        let providers =
+            ResourceProviders.all
+            |> List.map (fun ns ->
+                ns,
+                Command(
+                    $"provider-{ns}",
+                    CommandArgs(
+                        Create = "az provider register --namespace \"$NAMESPACE\" --wait",
+                        Environment = inputMap [ "NAMESPACE", input ns ]
+                    )
+                ))
+            |> Map.ofList
+
         // Defender for open-source databases (D93, D97): the subscription's plan, so every Postgres server is covered
         // (dev now, prod later), billed per server-hour. Its alerts reach our telemetry through the Activity Log.
         let defender =
@@ -315,6 +330,9 @@ let private run () =
                     ScopeId = $"/subscriptions/{subscriptionId}",
                     PricingName = "OpenSourceRelationalDatabases",
                     PricingTier = Security.PricingTier.Standard
+                ),
+                CustomResourceOptions(
+                    DependsOn = inputList [ input (providers["Microsoft.Security"] :> Pulumi.Resource) ]
                 )
             )
 
@@ -322,7 +340,7 @@ let private run () =
         Log.Info(
             $"shared: registry {registryName} (Basic, Entra-only, repository permissions), {apps.Length} app pusher(s); "
             + $"""addresses for {String.concat ", " environments}; telemetry storage {telemetryAccountName}; budget {budget}/month; """
-            + "Defender for open-source databases"
+            + $"Defender for open-source databases; {providers.Count} resource providers registered"
         )
 
         dict

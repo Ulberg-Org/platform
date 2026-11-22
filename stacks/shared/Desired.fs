@@ -55,3 +55,21 @@ module Telemetry =
 /// The monthly budget alert (D89): percentages at which the alert list hears about it.
 module Budget =
     let thresholds = [ 50; 80; 100 ]
+
+/// The Azure services the stacks use. A subscription must register each once before using it; `shared` does
+/// that as code (idempotent), first, so a stack never fails on a service nobody registered by hand.
+/// bootstrap/bootstrap.sh registers only what it needs before any stack exists.
+module ResourceProviders =
+    let all =
+        [
+            "Microsoft.ContainerRegistry"
+            "Microsoft.ContainerService"
+            "Microsoft.DBforPostgreSQL"
+            "Microsoft.EventHub"
+            "Microsoft.Insights"
+            "Microsoft.KeyVault"
+            "Microsoft.ManagedIdentity"
+            "Microsoft.Network"
+            "Microsoft.Security"
+            "Microsoft.Storage"
+        ]

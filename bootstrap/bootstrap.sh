@@ -41,6 +41,8 @@ assign_role() { # principal-id principal-type role scope
 }
 
 # --- providers ----------------------------------------------------------------
+# What the bootstrap and the first applies need. Everything the stacks use is registered by `shared`, as code
+# (ResourceProviders in stacks/shared/Desired.fs), so a new service never needs this script again.
 log "Registering resource providers"
 for ns in Microsoft.ContainerService Microsoft.DBforPostgreSQL Microsoft.KeyVault Microsoft.ContainerRegistry \
           Microsoft.Network Microsoft.OperationalInsights Microsoft.Insights Microsoft.ManagedIdentity \
