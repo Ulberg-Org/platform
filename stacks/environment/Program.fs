@@ -375,7 +375,8 @@ let private run () =
 
         // The settings the platform owns (D93), one after another (ServerSettings), then a restart: Postgres reads
         // shared_preload_libraries only at start, and Pulumi can't restart a server, so az does, as CI's apply
-        // identity, once per server and preload.
+        // identity, once per server and preload. Azure runs one operation on a server at a time and refuses the
+        // rest, so everything done to it is one chain: its admin, the settings, the restart, the apps' databases.
         let settings =
             ServerSettings.all
             |> List.fold
@@ -397,7 +398,7 @@ let private run () =
                         )
                         :> Resource
                     ])
-                []
+                [ administrator :> Resource ]
 
         let restart =
             Pulumi.Command.Local.Command(
@@ -563,7 +564,10 @@ let private run () =
                         Charset = "UTF8",
                         Collation = "en_US.utf8"
                     ),
-                    CustomResourceOptions(DeletedWith = database)
+                    CustomResourceOptions(
+                        DeletedWith = database,
+                        DependsOn = inputList [ input (restart :> Resource) ]
+                    )
                 ))
 
         // The cluster, for Pulumi: its address and CA, and kubelogin as the job's az session (Cluster.kubeconfig).
