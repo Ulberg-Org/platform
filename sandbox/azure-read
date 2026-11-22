@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Claude's read-only Azure in its sandbox (D88, D96): reads as its agent identity, with the 1-hour access tokens
+# sandbox/tokens copies in every 45 minutes. Only a GET on Azure Resource Manager or a Log Analytics query; the
+# agent's roles refuse writes anyway.
+#
+#   azure-read '/subscriptions/<id>/resourceGroups?api-version=2021-04-01'
+#   azure-read logs <workspace id> 'AzureActivity | take 10'
+set -euo pipefail
+usage="usage: azure-read <ARM path, starting with /> | azure-read logs <workspace id> <KQL query>"
+token() {
+  cat ~/.config/azure-read/"$1" 2>/dev/null ||
+    { echo "No Azure token: only the platform profile has one (sandbox/tokens renews it every 45 minutes)" >&2; exit 1; }
+}
+case "${1:-}" in
+  logs)
+    token=$(token logs)
+    jq -cn --arg query "${3:?$usage}" '{query: $query}' |
+      curl -sS --fail-with-body -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data @- \
+        "https://api.loganalytics.io/v1/workspaces/${2:?$usage}/query" ;;
+  /*)
+    token=$(token management)
+    curl -sS --fail-with-body -H "Authorization: Bearer $token" "https://management.azure.com$1" ;;
+  *) echo "$usage" >&2; exit 1 ;;
+esac

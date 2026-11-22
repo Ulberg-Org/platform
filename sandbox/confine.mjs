@@ -1,7 +1,8 @@
 // Runs Claude's Lima VM (D81) so that its only way out is srt's allowlisting proxy: Lima's host process, which
 // re-creates every connection the VM makes, may connect only to that proxy and to the VM's SSH port (macOS
-// Seatbelt, enforced by the host's kernel; root in the VM can't lift it). Also keeps Claude's GitHub token in the
-// VM fresh. Started by sandbox/sandbox, and lives as long as the VM: `limactl stop` ends both.
+// Seatbelt, enforced by the host's kernel; root in the VM can't lift it). Also keeps Claude's tokens (GitHub's,
+// and Azure's in the platform profile) in the VM fresh (sandbox/tokens). Started by sandbox/sandbox, and lives as
+// long as the VM: `limactl stop` ends both.
 //
 //   node confine.mjs <instance>
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime'
@@ -64,15 +65,12 @@ const lima = spawn('sandbox-exec', ['-p', profile, 'limactl', 'start', '--foregr
   '--ssh-port', String(sshPort), instance], { stdio: 'inherit', env })
 lima.on('exit', code => process.exit(code ?? 1))
 
-// Claude's GitHub app token (D52) lasts an hour: a fresh one into the VM's gh every 45 minutes.
-const renewToken = () => {
+// Claude's tokens (GitHub's, and Azure's in the platform profile) last an hour: fresh ones every 45 minutes.
+const renewTokens = () => {
   try {
-    const token = execFileSync(`${here}github-token`, { encoding: 'utf8' }).trim()
-    execFileSync('limactl', ['shell', '--workdir', '/', instance, '--', 'sh', '-c',
-      'mkdir -p ~/.config/gh-claude && cat >~/.config/gh-claude/hosts.yml && chmod 600 ~/.config/gh-claude/hosts.yml'],
-      { input: `github.com:\n    oauth_token: ${token}\n    git_protocol: https\n    user: ulberg-claude[bot]\n` })
+    execFileSync(`${here}tokens`, [instance], { stdio: ['ignore', 'ignore', 'pipe'] })
   } catch (error) {
-    console.error(`GitHub token not renewed: ${error.message}`)
+    console.error(`Tokens not renewed: ${error.message}`)
   }
 }
-setInterval(renewToken, 45 * 60 * 1000)
+setInterval(renewTokens, 45 * 60 * 1000)

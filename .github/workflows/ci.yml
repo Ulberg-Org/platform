@@ -80,6 +80,8 @@ jobs:
         run: .github/scripts/test_empty_group.sh
       - name: Test that claude-push.sh publishes exactly the local tree (D52)
         run: scripts/test_claude_push.sh
+      - name: Test the sandbox's azure-read (D96)
+        run: sandbox/test_azure_read.sh
       - name: Test the teardown guard (guard.yml)
         run: .github/scripts/test_check_teardown_use.sh
       - name: Test releasing a cancelled run's lock (start, destroy)
