@@ -148,7 +148,15 @@ let private run () =
                     VirtualNetworkName = vnet.Name,
                     SubnetName = "nodes",
                     AddressPrefix = network.nodes,
-                    NetworkSecurityGroup = Network.Inputs.NetworkSecurityGroupArgs(Id = nodeRules.Id)
+                    NetworkSecurityGroup = Network.Inputs.NetworkSecurityGroupArgs(Id = nodeRules.Id),
+                    // The environment's Event Hub admits the nodes through it (D97: Alloy reads it in Phase 5).
+                    ServiceEndpoints =
+                        inputList
+                            [
+                                input (
+                                    Network.Inputs.ServiceEndpointPropertiesFormatArgs(Service = "Microsoft.EventHub")
+                                )
+                            ]
                 )
             )
 
@@ -403,7 +411,9 @@ let private run () =
             )
 
         // Azure's own signals for our telemetry (D97): the environment's Event Hub, which Alloy reads into Loki in
-        // Phase 5. Standard, for the Kafka endpoint Alloy reads; open only to Azure's own services until then.
+        // Phase 5. Standard, for the Kafka endpoint Alloy reads. Reachable only from the nodes' subnet (its service
+        // endpoint) and by Azure's trusted services, which is how Azure Monitor streams into a closed hub; Azure
+        // refuses Deny without a network rule unless public access is off entirely (D97).
         let hubs =
             EventHub.Namespace(
                 names.eventHubs,
@@ -444,6 +454,16 @@ let private run () =
                     ResourceGroupName = groupName,
                     NamespaceName = hubs.Name,
                     DefaultAction = EventHub.DefaultAction.Deny,
+                    VirtualNetworkRules =
+                        inputList
+                            [
+                                input (
+                                    EventHub.Inputs.NWRuleSetVirtualNetworkRulesArgs(
+                                        Subnet = EventHub.Inputs.SubnetArgs(Id = nodeSubnet.Id),
+                                        IgnoreMissingVnetServiceEndpoint = false
+                                    )
+                                )
+                            ],
                     TrustedServiceAccessEnabled = true,
                     PublicNetworkAccess = EventHub.PublicNetworkAccessFlag.Enabled
                 ),
