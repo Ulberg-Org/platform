@@ -36,6 +36,8 @@ entries=$(git diff --no-renames --name-status "$parent" HEAD | while IFS=$'\t' r
     mode=$(git ls-tree HEAD -- "$path" | cut -d' ' -f1)
     blob=$(git show "HEAD:$path" | base64 | tr -d '\n' | jq -Rs '{content: ., encoding: "base64"}' |
       gh api "repos/$repo/git/blobs" --input - --jq .sha)
+    # A tree entry without a blob deletes the file: an upload that returned nothing must stop the publish.
+    [ -n "$blob" ] || { echo "Uploading $path failed; nothing published" >&2; exit 1; }
     jq -nc --arg p "$path" --arg m "$mode" --arg s "$blob" '{path: $p, mode: $m, type: "blob", sha: $s}'
   fi
 done | jq -s .)
@@ -58,8 +60,14 @@ else
   gh api "repos/$repo/git/refs" -f ref="refs/heads/$branch" -f sha="$commit" --silent
 fi
 
-# The local branch now matches what was published (same tree, one verified commit).
+# The local branch now matches what was published (same tree, one verified commit): checked before the local
+# commits are replaced, so a publish that lost or changed a file is caught and nothing local is lost.
 git fetch -q origin "$branch"
+[ "$(git rev-parse "origin/$branch^{tree}")" = "$(git rev-parse "HEAD^{tree}")" ] || {
+  echo "The published $branch differs from the local commit (git diff HEAD origin/$branch); local branch kept" >&2
+  git diff --stat HEAD "origin/$branch" >&2
+  exit 1
+}
 git reset -q --keep "origin/$branch"
 git branch -q --set-upstream-to "origin/$branch"
 verified=$(gh api "repos/$repo/commits/$commit" --jq .commit.verification.verified)
