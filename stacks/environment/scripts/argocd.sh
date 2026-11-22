@@ -15,6 +15,7 @@ export KUBECONFIG="$work/kubeconfig"
 component="$root/components/argocd/component.yaml"
 namespace=$(yq '.namespace' "$component")
 digest=$(yq '.chart.digest' "$component")
+mkdir "$work/charts"
 helm pull "$(yq '.chart.name' "$component")" --repo "$(yq '.chart.repo' "$component")" \
   --version "$(yq '.chart.version' "$component")" -d "$work/charts"
 chart=$(ls "$work"/charts/*.tgz)
