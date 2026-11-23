@@ -27,7 +27,7 @@ in_azure=$({
     az monitor diagnostic-settings list --resource "$id" --query "[].id" -o tsv 2>/dev/null || true
   done
   az monitor diagnostic-settings subscription list --query "value[?name=='telemetry-$environment'].id" -o tsv
-} | grep -v '^$' | lower | sort -u)
+} | { grep -v '^$' || true; } | lower | sort -u)
 
 leftovers=$(comm -23 <(echo "$in_azure") <(echo "$known"))
 if [ -n "$leftovers" ]; then
