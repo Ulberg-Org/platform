@@ -1,0 +1,18 @@
+# In dev the Gateway answers on the environment's static address in `shared` (D45: pip-dev, so the URL never
+# changes), through Azure's public load balancer (Microsoft's AKS static-IP guide: the two annotations). The
+# cluster's identity may use that address (D84). The telemetry block local has comes with Phase 5, when dev has
+# a collector to send to.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: platform
+  namespace: gateway
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        annotations:
+          service.beta.kubernetes.io/azure-pip-name: pip-dev
+          service.beta.kubernetes.io/azure-load-balancer-resource-group: rg-platform-shared
