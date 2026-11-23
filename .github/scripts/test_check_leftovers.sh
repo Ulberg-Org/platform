@@ -19,3 +19,4 @@ check "a diagnostic setting the state doesn't know fails" orphan-setting 1 "diag
 check "a resource the state doesn't know fails" orphan-resource 1 "namespaces/evhns"
 check "the subscription's setting the state doesn't know fails" orphan-subscription-setting 1 "telemetry-dev"
 check "no group: nothing can clash" no-group 0 "doesn't exist"
+check "the group without an environment, and a state without resources: nothing can clash" destroyed 0 "No leftovers"

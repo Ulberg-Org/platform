@@ -13,10 +13,11 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 
 [ "$(az group exists --name "$group")" = true ] || { echo "$group doesn't exist: nothing can clash"; exit 0; }
 
-# Azure resource ids are case-insensitive, and az and Pulumi write some parts differently.
+# Azure resource ids are case-insensitive, and az and Pulumi write some parts differently. A destroyed environment's
+# state has no resources at all.
 lower() { tr '[:upper:]' '[:lower:]'; }
 known=$(cd "$here/stacks/environment" && pulumi stack export --stack "$environment" |
-  jq -r '.deployment.resources[].id // empty' | lower | sort -u)
+  jq -r '(.deployment.resources // [])[].id // empty' | lower | sort -u)
 resources=$(az resource list --resource-group "$group" --query "[].id" -o tsv)
 in_azure=$({
   echo "$resources"
