@@ -8,8 +8,8 @@ components: [ argocd, baseline, gateway ]
 # Network flow logs in AKS need Advanced Container Networking Services (D70); decided in Phase 3.
 networkFlows: false
 database:
-  # Postgres Flexible Server, private access (§9.1), one per database. {app} and {database} are filled in.
-  host: "{app}-{database}-dev.postgres.database.azure.com"
+  # Postgres Flexible Server, private access (§9.1): one server per environment, a database per app (D85).
+  host: psql-ulberg-dev.postgres.database.azure.com
   port: 5432
   # The database subnet (D70): name-based rules need a paid AKS add-on, so services reach it by address range.
   range: 10.20.2.0/24
